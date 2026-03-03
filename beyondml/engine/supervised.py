@@ -26,8 +26,14 @@ class SupervisedPipeline:
         self.X = df.drop(columns=[target_column])
         self.y = df[target_column]
 
+    def _calc_gap(self, train, val) -> float:
+        t = train.get("accuracy" if self.problem_type == "classification" else "r2", 0)
+        v = val.get("accuracy" if self.problem_type == "classification" else "r2", 0)
+        return round(float(t - v), 4)
+
     def run_baselines(self) -> Dict[str, Any]:
         stratify = self.y if self.problem_type == "classification" else None
+        # Spec 1.1: Use evaluation-only outer folds concept or simple robust validation for baselines
         X_train, X_val, y_train, y_val = train_test_split(
             self.X, self.y, test_size=0.2, random_state=42, stratify=stratify
         )

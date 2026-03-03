@@ -112,6 +112,9 @@ class GATrainerAgent:
         )
 
         # Start GA in background thread
+        ori_score = profile.get("overfitting_risk_index", {}).get("score", 0.0)
+        await log(f"  [dim]ORI Risk Index: {ori_score:.4f} (Beta-scaled penalties active)[/dim]")
+        
         ga_task = asyncio.create_task(asyncio.to_thread(optimizer.evolve))
 
         # Process progress updates while GA runs

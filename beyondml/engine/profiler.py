@@ -91,7 +91,74 @@ class DatasetProfiler:
             "correlation_summary": self._correlation_summary(),
             "categorical_cardinality": self._categorical_cardinality(),
             "outlier_summary": self._outlier_summary(),
+            "overfitting_risk_index": self._calculate_ori(),
         }
+
+    def _calculate_ori(self) -> Dict[str, Any]:
+        """
+        Compute Overfitting Risk Index (ORI).
+        ORI = w1*r + w2*I + w3*(1-MI) + w4*Corr + w5*Noise
+        """
+        n = len(self.df)
+        d = len(self.feature_columns)
+        
+        # 1. Dimensional Ratio (r = D/N) - Normalized to [0,1]
+        r = min(d / n, 1.0) if n > 0 else 1.0
+
+        # 2. Imbalance Ratio (I) - Normalized [0,1]
+        target_analysis = self._target_analysis()
+        imbalance = 0.0
+        if target_analysis and target_analysis.get("target_type") == "classification":
+            # imb_ratio is min class pct. If perfectly balanced (0.5 for binary), I=0. If rare (0.01), I=0.99
+            imb_ratio = target_analysis.get("imbalance_ratio", 0.5)
+            # Normalize: 0.5 -> 0, 0.0 -> 1
+            imbalance = 1.0 - (imb_ratio * 2.0) if imb_ratio < 0.5 else 0.0
+
+        # 3. Mutual Information (MI)
+        mi_val = self._average_mutual_information()
+        one_minus_mi = 1.0 - mi_val
+
+        # 4. Feature Correlation (Corr)
+        corr_summary = self._correlation_summary()
+        # Avg correlation of numeric columns
+        numerics = self.df.select_dtypes(include=[np.number])
+        if numerics.shape[1] > 1:
+            corr_mean = numerics.corr().abs().values[np.triu_indices(numerics.shape[1], k=1)].mean()
+            corr_mean = 0.0 if np.isnan(corr_mean) else corr_mean
+        else:
+            corr_mean = 0.0
+
+        # 5. Noise Estimate
+        # Proxy: Percentage of data points that are outliers
+        outliers = self._outlier_summary()
+        noise_pct = sum(v["pct"] for v in outliers.values()) / max(len(outliers), 1)
+
+        # Weights w1..w5 (Sum = 1)
+        w = [0.3, 0.2, 0.2, 0.2, 0.1]
+        ori = (w[0] * r + w[1] * imbalance + w[2] * one_minus_mi + w[3] * corr_mean + w[4] * noise_pct)
+        ori = float(min(max(ori, 0), 1))
+
+        return {
+            "score": round(ori, 4),
+            "metrics": {
+                "d_n_ratio": round(r, 4),
+                "imbalance": round(imbalance, 4),
+                "one_minus_mi": round(one_minus_mi, 4),
+                "mean_corr": round(corr_mean, 4),
+                "noise_proxy": round(noise_pct, 4)
+            }
+        }
+
+    def _average_mutual_information(self) -> float:
+        """Heuristic for Mutual Information using correlation as a proxy for this layer."""
+        if not self.target_column: return 0.5
+        # For a prompt analysis, we'll use a simplified correlation-based MI proxy
+        # to avoid bringing in sklearn.feature_selection here if not needed.
+        numerics = self.df.select_dtypes(include=[np.number])
+        if self.target_column in numerics.columns:
+            target_corr = numerics.corr()[self.target_column].abs().drop(self.target_column).mean()
+            return float(min(target_corr if not np.isnan(target_corr) else 0.3, 1.0))
+        return 0.4 # Default mid-point for categorical/complex target mi proxy
 
     def _basic_metadata(self) -> Dict[str, Any]:
         return {

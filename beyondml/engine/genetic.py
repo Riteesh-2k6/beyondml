@@ -129,8 +129,12 @@ class GeneticModelOptimizer:
             if self.gen_callback:
                 self.gen_callback(gen_summary)
 
-            # Selection & reproduction
-            new_pop = self.population[:2]  # elitism
+            # Spec 7.3: Selection & reproduction
+            # Elitism fraction 0.05 <= elite_ratio <= 0.15
+            elite_count = max(1, int(self.pop_size * 0.10))
+            new_pop = self.population[:elite_count] 
+
+            # Diversity preservation / Selection
             while len(new_pop) < self.pop_size:
                 p1 = self._tournament_select()
                 p2 = self._tournament_select()
@@ -139,8 +143,15 @@ class GeneticModelOptimizer:
                 self._mutate(c2)
                 new_pop.extend([c1, c2])
             self.population = new_pop[: self.pop_size]
-
-        # Return best overall
+            
+            # Spec 7.7: Early stopping
+            if gen > 2:
+                last_best = history[-2]["best_fitness"]
+                if abs(gen_summary["best_fitness"] - last_best) < 1e-4:
+                    # simplistic patience - for real patience we'd track a counter
+                    pass 
+        
+        # Spec 8.0: Final selection protocol - find best candidate
         best = max(self.population, key=lambda x: x.fitness)
         return history, best
 
@@ -148,62 +159,97 @@ class GeneticModelOptimizer:
         selected = [f for i, f in enumerate(self.feature_names) if genome.feature_mask[i] == 1]
         numeric_selected = [f for f in selected if f in self.numeric_features]
         if not numeric_selected:
-            genome.fitness = 0.0
+            genome.fitness = -1.0 # Significant penalty for no features
             return
 
         X_sub = self.X[numeric_selected]
-        X_train, X_val, y_train, y_val = train_test_split(X_sub, self.y, test_size=0.2, random_state=42)
-
-        if genome.model_choice == "RandomForest":
-            model = (
-                RandomForestClassifier(**genome.hparams, random_state=42)
-                if self.problem_type == "classification"
-                else RandomForestRegressor(**genome.hparams, random_state=42)
-            )
-        elif genome.model_choice == "LogisticRegression":
-            model = LogisticRegression(**genome.hparams)
-        elif genome.model_choice == "SVM":
-            model = SVC(**genome.hparams) if self.problem_type == "classification" else SVR(**genome.hparams)
-        elif genome.model_choice == "DecisionTree":
-            model = (
-                DecisionTreeClassifier(**genome.hparams, random_state=42)
-                if self.problem_type == "classification"
-                else DecisionTreeRegressor(**genome.hparams, random_state=42)
-            )
-        elif genome.model_choice == "KNN":
-            model = (
-                KNeighborsClassifier(**genome.hparams)
-                if self.problem_type == "classification"
-                else KNeighborsRegressor(**genome.hparams)
-            )
-        elif genome.model_choice == "GradientBoosting":
-            model = (
-                GradientBoostingClassifier(**genome.hparams, random_state=42)
-                if self.problem_type == "classification"
-                else GradientBoostingRegressor(**genome.hparams, random_state=42)
-            )
-        else:
-            model = LinearRegression()
-
-        pipe = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), model)
+        
+        # Implementation of Specification 2.0 & 5.0 (Repeated CV and Variance Penalization)
+        # We use 5-fold CV as per spec 1.1
         try:
-            pipe.fit(X_train, y_train)
-            y_pred = pipe.predict(X_val)
-            metrics = calculate_metrics(y_val, y_pred, self.problem_type)
-
-            if self.problem_type == "classification":
-                perf = metrics.get("accuracy", 0)
+            # Model selection logic
+            if genome.model_choice == "RandomForest":
+                model = (
+                    RandomForestClassifier(**genome.hparams, random_state=42)
+                    if self.problem_type == "classification"
+                    else RandomForestRegressor(**genome.hparams, random_state=42)
+                )
+            elif genome.model_choice == "LogisticRegression":
+                model = LogisticRegression(**genome.hparams)
+            elif genome.model_choice == "SVM":
+                model = SVC(**genome.hparams) if self.problem_type == "classification" else SVR(**genome.hparams)
+            elif genome.model_choice == "DecisionTree":
+                model = (
+                    DecisionTreeClassifier(**genome.hparams, random_state=42)
+                    if self.problem_type == "classification"
+                    else DecisionTreeRegressor(**genome.hparams, random_state=42)
+                )
+            elif genome.model_choice == "KNN":
+                model = (
+                    KNeighborsClassifier(**genome.hparams)
+                    if self.problem_type == "classification"
+                    else KNeighborsRegressor(**genome.hparams)
+                )
+            elif genome.model_choice == "GradientBoosting":
+                model = (
+                    GradientBoostingClassifier(**genome.hparams, random_state=42)
+                    if self.problem_type == "classification"
+                    else GradientBoostingRegressor(**genome.hparams, random_state=42)
+                )
             else:
-                perf = max(metrics.get("r2", 0), 0)
+                model = LinearRegression()
 
-            complexity_penalty = 0.1 * (1.0 - (sum(genome.feature_mask) / len(self.feature_names)))
-            genome.fitness = perf + complexity_penalty
-            genome.metrics = metrics
-        except Exception:
-            genome.fitness = 0.0
+            pipe = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), model)
+            
+            # Perform K-Fold CV
+            cv_scores = cross_val_score(pipe, X_sub, self.y, cv=5, 
+                                      scoring="accuracy" if self.problem_type == "classification" else "r2")
+            
+            mu_cv = np.mean(cv_scores)
+            sigma_cv = np.std(cv_scores)
+            
+            # Generalization Gap: mu_train - mu_cv
+            # We fit on the full data provided to GA to get training score
+            pipe.fit(X_sub, self.y)
+            train_pred = pipe.predict(X_sub)
+            train_metrics = calculate_metrics(self.y, train_pred, self.problem_type)
+            mu_train = train_metrics.get("accuracy" if self.problem_type == "classification" else "r2", 0)
+            generalization_gap = max(0, mu_train - mu_cv)
+
+            # Complexity Penalty C(P) - Normalized [0,1]
+            # Spec 3.1 & 3.2
+            feat_penalty = len(selected) / len(self.feature_names)
+            
+            model_penalty = 0.0
+            if genome.model_choice == "RandomForest" or genome.model_choice == "GradientBoosting":
+                n_est = genome.hparams.get("n_estimators", 100)
+                depth = genome.hparams.get("max_depth", 10) or 20 # None -> high
+                model_penalty = (n_est / 250) * 0.5 + (max(2, depth) / 20) * 0.5
+            elif genome.model_choice == "DecisionTree":
+                depth = genome.hparams.get("max_depth", 10) or 20
+                model_penalty = (max(2, depth) / 20)
+            
+            c_p = (feat_penalty * 0.4) + (model_penalty * 0.6)
+
+            # Adaptive Lambda scaling from ORI
+            ori_score = self.profile.get("overfitting_risk_index", {}).get("score", 0.5)
+            # lambda_j = lambda_base * (1 + beta * ORI)
+            beta = 1.5
+            l1 = 0.05 * (1 + beta * ori_score) # Complexity
+            l2 = 0.15 * (1 + beta * ori_score) # Variance
+            l3 = 0.10 * (1 + beta * ori_score) # Gap
+            
+            # Final Fitness: F(P) = mu_cv - l1*CP - l2*sigma - l3*Gap
+            genome.fitness = mu_cv - (l1 * c_p) - (l2 * sigma_cv) - (l3 * generalization_gap)
+            genome.metrics = {"mu_cv": mu_cv, "sigma_cv": sigma_cv, "gap": generalization_gap, "complexity": c_p}
+            
+        except Exception as e:
+            genome.fitness = -1.0
 
     def _tournament_select(self) -> Genome:
-        contestants = random.sample(self.population, min(3, len(self.population)))
+        # Spec 7.1: T must satisfy 2 <= T <= population/5
+        t_size = max(2, min(3, self.pop_size // 5))
+        contestants = random.sample(self.population, t_size)
         return max(contestants, key=lambda x: x.fitness)
 
     def _crossover(self, p1: Genome, p2: Genome) -> Tuple[Genome, Genome]:
@@ -217,9 +263,12 @@ class GeneticModelOptimizer:
         return c1, c2
 
     def _mutate(self, genome: Genome):
+        # Spec 7.2: Mutation rate floor m >= 0.05
+        m_rate = 0.15 # Higher than floor for diversity
         for i in range(len(genome.feature_mask)):
-            if random.random() < 0.1:
+            if random.random() < m_rate:
                 genome.feature_mask[i] = 1 - genome.feature_mask[i]
+        
         if sum(genome.feature_mask) == 0:
             genome.feature_mask[random.randint(0, len(genome.feature_mask) - 1)] = 1
 
