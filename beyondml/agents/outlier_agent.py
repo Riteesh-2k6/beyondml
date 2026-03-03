@@ -66,7 +66,8 @@ class OutlierAgent:
 
         await log(f"  Groq recommends: [bold cyan]{rec_strategy}[/bold cyan] for {outlier_cols}")
         if reasoning:
-           await log(f"  [bold cyan]Explanation:[/bold cyan] [dim]{reasoning}[/dim]")
+            await log(f"  [bold cyan]Explanation:[/bold cyan]")
+            await log(f"    [dim]{reasoning}[/dim]")
 
         # Present options to user (human-in-the-loop)
         prompt = (

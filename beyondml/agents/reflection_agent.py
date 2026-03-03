@@ -110,7 +110,8 @@ class ReflectionAgent:
             result = json.loads(response)
             
             reasoning = result.get("reasoning", "")
-            await log(f"  [bold cyan]AI Reflection:[/bold cyan] [italic]{reasoning}[/italic]")
+            await log(f"  [bold cyan]AI Reflection:[/bold cyan]")
+            await log(f"    [italic]{reasoning}[/italic]")
             
             drops = result.get("features_to_drop", [])
             for d in drops:
@@ -118,7 +119,8 @@ class ReflectionAgent:
                  
             new_feats = result.get("new_features", [])
             for f in new_feats:
-                 await log(f"  [green]+[/green] Proposed Feature: {f.get('name')} = {f.get('expr')}")
+                 await log(f"  [green]+[/green] Proposed Feature: [bold]{f.get('name')}[/bold]")
+                 await log(f"    [dim]Formula: {f.get('expr')}[/dim]")
                  
             next_model = result.get("next_model")
             next_ga_gens = result.get("next_ga_generations", 5)

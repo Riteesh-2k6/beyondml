@@ -62,7 +62,8 @@ class FeatureAgent:
                 if isinstance(result, pd.Series) and len(result) == len(df):
                     df[name] = result
                     features_applied.append(name)
-                    await log(f"  [green]+[/green] {name} = {expr}")
+                    await log(f"  [green]+[/green] [bold]{name}[/bold]")
+                    await log(f"    [dim]Formula: {expr}[/dim]")
                     await log(f"    [bold cyan]Explanation:[/bold cyan] [dim]{rationale}[/dim]")
                 else:
                     features_rejected.append(name)

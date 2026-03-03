@@ -116,7 +116,8 @@ Analyze this dataset and decide the best analysis path."""
             result = json.loads(response)
 
             await log(f"  Path: [bold green]{result.get('path', 'supervised')}[/bold green]")
-            await log(f"  Reasoning: [dim]{result.get('reasoning', 'N/A')}[/dim]")
+            await log(f"  [bold cyan]Reasoning:[/bold cyan]")
+            await log(f"    [dim]{result.get('reasoning', 'N/A')}[/dim]")
             if result.get("suggested_target"):
                 await log(f"  Suggested target: [bold yellow]{result['suggested_target']}[/bold yellow]")
             await log(f"  Confidence: {result.get('confidence', 'medium')}")
