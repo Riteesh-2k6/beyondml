@@ -1,0 +1,20 @@
+[
+    {
+        "gen": 0,
+        "best_fitness": 0.9205933417432515,
+        "best_model": "LinearRegression",
+        "num_features": 2
+    },
+    {
+        "gen": 1,
+        "best_fitness": 0.9205933417432515,
+        "best_model": "LinearRegression",
+        "num_features": 2
+    },
+    {
+        "gen": 2,
+        "best_fitness": 0.9205933417432515,
+        "best_model": "LinearRegression",
+        "num_features": 2
+    }
+]

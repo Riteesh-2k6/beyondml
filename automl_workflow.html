@@ -1,0 +1,1793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoML Platform — Detailed Workflow</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0a0c10;
+    --surface: #0f1117;
+    --surface2: #161b24;
+    --surface3: #1c2333;
+    --border: #21262d;
+    --border2: #30363d;
+    --cyan: #79c0ff;
+    --cyan-dim: #1f4068;
+    --green: #56d364;
+    --green-dim: #0d2a17;
+    --yellow: #e3b341;
+    --yellow-dim: #2d2207;
+    --orange: #f0883e;
+    --orange-dim: #3a1a06;
+    --pink: #ff7b72;
+    --pink-dim: #3d1110;
+    --purple: #bc8cff;
+    --purple-dim: #2a1a4a;
+    --blue: #388bfd;
+    --blue-dim: #0c1f48;
+    --white: #e6edf3;
+    --muted: #7d8590;
+    --muted2: #484f58;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--white);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: sticky;
+    top: 0;
+    background: rgba(10,12,16,0.95);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+  }
+  .header-logo {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+  .header-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--white);
+  }
+  .header-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .badge-groq { background: var(--orange-dim); color: var(--orange); border: 1px solid var(--orange); }
+  .badge-lg { background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple); }
+  .badge-textual { background: var(--cyan-dim); color: var(--cyan); border: 1px solid var(--cyan); }
+  .badge-deap { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+
+  /* ── Nav tabs ── */
+  .nav {
+    display: flex;
+    gap: 0;
+    padding: 0 40px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .nav-tab {
+    padding: 12px 20px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 12px;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .nav-tab:hover { color: var(--white); }
+  .nav-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+  /* ── Sections ── */
+  .section { display: none; padding: 40px; }
+  .section.active { display: block; }
+
+  /* ── Section title ── */
+  .section-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--white);
+    margin-bottom: 6px;
+  }
+  .section-sub {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 36px;
+  }
+
+  /* ── Flow diagram ── */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .flow-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    position: relative;
+  }
+
+  .flow-row-center {
+    justify-content: center;
+  }
+
+  /* vertical connector */
+  .v-connector {
+    width: 2px;
+    min-height: 32px;
+    background: var(--border2);
+    margin: 0 auto;
+    position: relative;
+  }
+  .v-connector::after {
+    content: '▼';
+    position: absolute;
+    bottom: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--border2);
+    font-size: 10px;
+  }
+  .v-connector.cyan { background: var(--cyan); }
+  .v-connector.cyan::after { color: var(--cyan); }
+  .v-connector.green { background: var(--green); }
+  .v-connector.green::after { color: var(--green); }
+  .v-connector.yellow { background: var(--yellow); }
+  .v-connector.yellow::after { color: var(--yellow); }
+  .v-connector.purple { background: var(--purple); }
+  .v-connector.purple::after { color: var(--purple); }
+  .v-connector.orange { background: var(--orange); }
+  .v-connector.orange::after { color: var(--orange); }
+
+  /* nodes */
+  .node {
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 16px 20px;
+    background: var(--surface2);
+    position: relative;
+    cursor: pointer;
+    transition: all 0.25s;
+    min-width: 220px;
+  }
+  .node:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .node.cyan { border-color: var(--cyan); }
+  .node.cyan:hover { box-shadow: 0 8px 32px rgba(121,192,255,0.15); }
+  .node.green { border-color: var(--green); }
+  .node.green:hover { box-shadow: 0 8px 32px rgba(86,211,100,0.15); }
+  .node.yellow { border-color: var(--yellow); }
+  .node.yellow:hover { box-shadow: 0 8px 32px rgba(227,179,65,0.15); }
+  .node.orange { border-color: var(--orange); }
+  .node.orange:hover { box-shadow: 0 8px 32px rgba(240,136,62,0.15); }
+  .node.pink { border-color: var(--pink); }
+  .node.pink:hover { box-shadow: 0 8px 32px rgba(255,123,114,0.15); }
+  .node.purple { border-color: var(--purple); }
+  .node.purple:hover { box-shadow: 0 8px 32px rgba(188,140,255,0.15); }
+  .node.blue { border-color: var(--blue); }
+  .node.blue:hover { box-shadow: 0 8px 32px rgba(56,139,253,0.15); }
+
+  .node-icon { font-size: 18px; margin-bottom: 6px; }
+  .node-label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .node-sub { font-size: 10px; color: var(--muted); line-height: 1.4; }
+  .node-tag {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-top: 6px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .tag-langgraph { background: var(--purple-dim); color: var(--purple); }
+  .tag-textual { background: var(--cyan-dim); color: var(--cyan); }
+  .tag-groq { background: var(--orange-dim); color: var(--orange); }
+  .tag-deap { background: var(--green-dim); color: var(--green); }
+  .tag-sklearn { background: var(--blue-dim); color: var(--blue); }
+  .tag-plotext { background: var(--yellow-dim); color: var(--yellow); }
+
+  /* branch split */
+  .branch-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: var(--surface3);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    margin: 0 0 0 0;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .branch-header .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .branches {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    margin-top: 0;
+  }
+
+  .branch {
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .branch-title {
+    padding: 10px 16px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border2);
+  }
+  .branch-title.explore { background: var(--cyan-dim); color: var(--cyan); }
+  .branch-title.supervised { background: var(--green-dim); color: var(--green); }
+  .branch-title.unsupervised { background: var(--purple-dim); color: var(--purple); }
+
+  .branch-nodes {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--surface);
+  }
+
+  .mini-node {
+    padding: 10px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border2);
+    background: var(--surface2);
+    font-size: 11px;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .mini-node:hover { border-color: var(--border); transform: translateX(3px); }
+  .mini-node .mn-label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+  .mini-node .mn-sub { color: var(--muted); font-size: 10px; }
+  .mini-arrow {
+    text-align: center;
+    color: var(--border2);
+    font-size: 10px;
+    padding: 2px 0;
+  }
+
+  /* ── TUI Layout diagram ── */
+  .tui-container {
+    border: 2px solid var(--border2);
+    border-radius: 10px;
+    overflow: hidden;
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg);
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .tui-titlebar {
+    background: var(--surface3);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tui-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .tui-dot.r { background: #ff5f56; }
+  .tui-dot.y { background: #ffbd2e; }
+  .tui-dot.g { background: #27c93f; }
+  .tui-title-text { font-size: 11px; color: var(--muted); margin-left: 8px; }
+
+  .tui-body {
+    display: grid;
+    grid-template-columns: 240px 1fr 260px;
+    grid-template-rows: 1fr auto;
+    height: 620px;
+  }
+
+  .tui-panel {
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .tui-panel:last-child { border-right: none; }
+
+  .tui-panel-title {
+    background: var(--surface3);
+    padding: 6px 12px;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .tui-panel-body {
+    padding: 12px;
+    overflow-y: auto;
+    flex: 1;
+    font-size: 11px;
+  }
+
+  /* Pipeline tree in left panel */
+  .pipeline-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .pipeline-item:hover { background: var(--surface3); }
+  .pipeline-item.active { background: var(--cyan-dim); }
+  .pipeline-item .pi-icon { font-size: 12px; width: 16px; text-align: center; }
+  .pipeline-item .pi-label { font-size: 11px; color: var(--white); flex: 1; }
+  .pipeline-item .pi-status { font-size: 10px; }
+  .pipeline-item.done .pi-label { color: var(--muted); }
+  .pipeline-item.running .pi-label { color: var(--cyan); }
+  .pipeline-item.active .pi-label { color: var(--cyan); }
+
+  .pi-children { padding-left: 24px; }
+
+  /* Center log panel */
+  .log-area { font-size: 11px; padding: 12px 16px; }
+  .log-line { margin-bottom: 2px; line-height: 1.5; }
+  .log-line.agent { color: var(--cyan); }
+  .log-line.info { color: var(--white); }
+  .log-line.warn { color: var(--yellow); }
+  .log-line.success { color: var(--green); }
+  .log-line.muted { color: var(--muted); }
+  .log-line.stream { color: var(--orange); }
+
+  /* Chart in center panel */
+  .chart-block {
+    margin: 12px 16px;
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .chart-title-bar {
+    background: var(--surface3);
+    padding: 5px 12px;
+    font-size: 10px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .chart-body {
+    padding: 12px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: var(--green);
+    background: var(--surface);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: pre;
+  }
+
+  /* Right panel */
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+  }
+  .stat-key { color: var(--muted); }
+  .stat-val { color: var(--white); font-weight: 600; }
+
+  .mini-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 8px; }
+  .mini-table th { color: var(--muted); padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+  .mini-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); color: var(--white); }
+  .mini-table tr:last-child td { border-bottom: none; }
+
+  .sparkline {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 50px;
+    padding: 8px 0;
+  }
+  .spark-bar {
+    background: var(--cyan);
+    border-radius: 2px 2px 0 0;
+    flex: 1;
+    opacity: 0.8;
+    transition: height 0.3s;
+  }
+
+  /* Bottom input bar */
+  .tui-input-bar {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border2);
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    gap: 12px;
+    background: var(--surface);
+  }
+  .tui-prompt { color: var(--cyan); font-size: 12px; }
+  .tui-cursor {
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    background: var(--cyan);
+    animation: blink 1s infinite;
+    vertical-align: middle;
+    margin-left: 2px;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  .tui-input-hint { color: var(--muted); font-size: 10px; margin-left: auto; }
+
+  /* ── State schema section ── */
+  .schema-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .schema-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .schema-card-title {
+    padding: 10px 16px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .schema-card-body { padding: 12px 16px; }
+  .schema-field {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 11px;
+  }
+  .sf-key { color: var(--cyan); white-space: nowrap; min-width: 130px; }
+  .sf-type { color: var(--yellow); white-space: nowrap; min-width: 80px; }
+  .sf-desc { color: var(--muted); }
+
+  /* ── GA section ── */
+  .ga-container { max-width: 1100px; margin: 0 auto; }
+  .ga-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+  .code-block {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .code-header {
+    padding: 8px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .code-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border2); }
+  .code-body {
+    padding: 16px;
+    font-size: 11px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+  .kw { color: var(--purple); }
+  .fn { color: var(--cyan); }
+  .str { color: var(--green); }
+  .cm { color: var(--muted); font-style: italic; }
+  .num { color: var(--orange); }
+  .cls { color: var(--yellow); }
+
+  /* chromosome visual */
+  .chromosome {
+    display: flex;
+    gap: 4px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+  }
+  .gene {
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 10px;
+    text-align: center;
+    background: var(--surface2);
+    min-width: 80px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .gene:hover { transform: translateY(-3px); }
+  .gene-name { color: var(--muted); font-size: 9px; margin-bottom: 2px; }
+  .gene-val { color: var(--white); font-weight: 700; font-size: 12px; }
+  .gene.c1 { border-color: var(--cyan); }
+  .gene.c2 { border-color: var(--green); }
+  .gene.c3 { border-color: var(--yellow); }
+  .gene.c4 { border-color: var(--orange); }
+  .gene.c5 { border-color: var(--purple); }
+
+  /* fitness chart */
+  .fitness-chart {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .fitness-chart-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .fc-area {
+    position: relative;
+    height: 140px;
+  }
+  .fc-svg { width: 100%; height: 100%; }
+  .fc-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* ── Agent detail cards ── */
+  .agent-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .agent-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: transform 0.2s;
+  }
+  .agent-card:hover { transform: translateY(-3px); }
+
+  .agent-card-header {
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .agent-icon-wrap {
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .agent-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .agent-lib { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+  .agent-card-body { padding: 14px 18px; }
+
+  .agent-section { margin-bottom: 12px; }
+  .agent-section-title {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 6px;
+  }
+  .agent-section-body { font-size: 11px; color: var(--white); line-height: 1.5; }
+
+  .io-row {
+    display: flex;
+    gap: 8px;
+    font-size: 10px;
+    margin-bottom: 3px;
+    align-items: flex-start;
+  }
+  .io-label { color: var(--muted); min-width: 30px; flex-shrink: 0; }
+  .io-val { color: var(--yellow); }
+
+  .tui-widget {
+    display: inline-block;
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--cyan-dim);
+    color: var(--cyan);
+    margin-right: 4px;
+    margin-bottom: 3px;
+    border: 1px solid rgba(121,192,255,0.2);
+  }
+
+  /* tooltip */
+  .tooltip {
+    position: relative;
+  }
+  .tooltip .tip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface3);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 11px;
+    white-space: nowrap;
+    z-index: 50;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    pointer-events: none;
+  }
+  .tooltip:hover .tip { display: block; }
+
+  /* Responsive tweaks */
+  @media (max-width: 900px) {
+    .tui-body { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
+    .branches { grid-template-columns: 1fr; }
+    .ga-grid { grid-template-columns: 1fr; }
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  /* animated entry */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .section.active > * { animation: fadeUp 0.3s ease both; }
+  .section.active > *:nth-child(2) { animation-delay: 0.05s; }
+  .section.active > *:nth-child(3) { animation-delay: 0.1s; }
+
+  .h-line {
+    height: 1px;
+    background: var(--border);
+    margin: 36px 0;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .label-box {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    max-width: 1100px;
+    margin: 0 auto 32px;
+  }
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .info-card-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .info-icon { font-size: 20px; }
+  .info-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .info-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-logo">AutoML Platform</div>
+    <div class="header-title">Detailed Technical Workflow</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;">
+    <span class="header-badge badge-groq">Groq LPU</span>
+    <span class="header-badge badge-lg">LangGraph</span>
+    <span class="header-badge badge-textual">Textual TUI</span>
+    <span class="header-badge badge-deap">DEAP · GA</span>
+  </div>
+</div>
+
+<div class="nav">
+  <div class="nav-tab active" onclick="showTab('overview')">① Overview Flow</div>
+  <div class="nav-tab" onclick="showTab('agents')">② Agent Details</div>
+  <div class="nav-tab" onclick="showTab('tui')">③ TUI Layout</div>
+  <div class="nav-tab" onclick="showTab('ga')">④ Genetic Algorithm</div>
+  <div class="nav-tab" onclick="showTab('state')">⑤ State Schema</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ TAB 1: OVERVIEW -->
+<div id="tab-overview" class="section active">
+  <div class="section-title">End-to-End Pipeline Overview</div>
+  <div class="section-sub">Complete data flow from CSV ingest to trained model — every node is a LangGraph node, every display is a Textual widget</div>
+
+  <div class="flow">
+
+    <!-- ENTRY -->
+    <div class="flow-row flow-row-center">
+      <div class="node cyan" style="text-align:center;min-width:320px;">
+        <div class="node-icon">📂</div>
+        <div class="node-label" style="color:var(--cyan)">Entry Point — TUI Boot Screen</div>
+        <div class="node-sub">User drops CSV path + natural language dataset description into Textual <code>Input</code> widgets. Pandas loads the DataFrame. LangGraph initialises <code>MLState</code>. The pipeline tree widget populates with all stage nodes in ⬜ pending state.</div>
+        <span class="node-tag tag-textual">Textual · Screen</span>
+        <span class="node-tag tag-langgraph">LangGraph · State Init</span>
+      </div>
+    </div>
+    <div class="v-connector cyan" style="height:40px;"></div>
+
+    <!-- ORCHESTRATOR -->
+    <div class="flow-row flow-row-center">
+      <div class="node purple" style="text-align:center;min-width:400px;">
+        <div class="node-icon">🧠</div>
+        <div class="node-label" style="color:var(--purple)">Orchestrator Node — Path Router</div>
+        <div class="node-sub">Groq call with full dataset summary (shape, dtypes, sample, description). LLM outputs a routing struct. Presents the user with 3 options as a Textual <code>RadioSet</code> widget inline in the log panel. Waits on <code>asyncio.Queue</code> until user selects.</div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
+          <span class="node-tag tag-langgraph">LangGraph Node</span>
+          <span class="node-tag tag-groq">Groq · llama-3.3-70b</span>
+          <span class="node-tag tag-textual">Textual · RadioSet</span>
+        </div>
+      </div>
+    </div>
+    <div class="v-connector purple" style="height:40px;"></div>
+
+    <!-- 3-WAY BRANCH -->
+    <div style="max-width:1100px;margin:0 auto;width:100%;">
+      <div class="branch-header" style="margin-bottom:20px;">
+        <div class="dot" style="background:var(--cyan)"></div>
+        <span>Conditional edge routes to one of three paths based on user selection</span>
+      </div>
+
+      <div class="branches">
+
+        <!-- EXPLORE PATH -->
+        <div class="branch">
+          <div class="branch-title explore">① Explore Dataset</div>
+          <div class="branch-nodes">
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--cyan)">🔍 EDA Agent</div>
+              <div class="mn-sub">Full analysis. Groq generates insight list + chart recommendations in JSON mode. Streams narrative to RichLog.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--cyan)">📊 Chart Renderer</div>
+              <div class="mn-sub">plotext renders histograms, correlation heatmaps, scatter plots, box plots as unicode strings — all inline in TUI.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--cyan)">🎯 Outlier Inspector</div>
+              <div class="mn-sub">IQR + Z-score analysis. Highlights anomalous rows in a DataTable widget with red background cells.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--cyan)">📋 EDA Report</div>
+              <div class="mn-sub">Saves full report to MLState. User can export as Markdown. Option to continue to supervised or unsupervised path.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUPERVISED PATH -->
+        <div class="branch">
+          <div class="branch-title supervised">② Supervised ML</div>
+          <div class="branch-nodes">
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--green)">🔍 EDA Agent</div>
+              <div class="mn-sub">Analysis + target suggestion. User confirms/overrides target column via Input widget.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--green)">🧹 Outlier Handler</div>
+              <div class="mn-sub">Conditional node. Groq recommends strategy. User picks: remove / cap / log-transform / flag.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--green)">⚙️ Feature Engineer</div>
+              <div class="mn-sub">Groq proposes derived features as pandas expressions. Sandboxed eval. Live schema diff shown in DataTable.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--green)">🧬 GA Trainer</div>
+              <div class="mn-sub">DEAP evolves hyperparameter chromosomes. Real-time fitness curve streams to Sparkline widget per generation.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--green)">📈 Evaluator Agent</div>
+              <div class="mn-sub">Groq narrates results. Confusion matrix, classification report, feature importances all render natively in TUI.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- UNSUPERVISED PATH -->
+        <div class="branch">
+          <div class="branch-title unsupervised">③ Unsupervised ML</div>
+          <div class="branch-nodes">
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--purple)">🔍 EDA Agent</div>
+              <div class="mn-sub">Dimensionality analysis. Checks sparsity, feature scales. Recommends normalisation strategy.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--purple)">🧹 Outlier Handler</div>
+              <div class="mn-sub">Same as supervised path. Outliers can heavily distort clusters so this is non-skippable.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--purple)">⚙️ Feature Engineer</div>
+              <div class="mn-sub">Same node, different context. Also proposes PCA or UMAP dimensionality reduction as a feature step.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--purple)">🔮 Clustering Agent</div>
+              <div class="mn-sub">Groq selects algorithm (KMeans / DBSCAN / Agglomerative / GMM). GA optimises k and eps/min_samples.</div>
+            </div>
+            <div class="mini-arrow">▼</div>
+            <div class="mini-node">
+              <div class="mn-label" style="color:var(--purple)">📈 Evaluator Agent</div>
+              <div class="mn-sub">Silhouette score, Davies-Bouldin. 2D PCA scatter of clusters renders via plotext with colour-coded points.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="v-connector green" style="height:40px;margin-top:20px;"></div>
+
+    <!-- FINAL -->
+    <div class="flow-row flow-row-center">
+      <div class="node blue" style="text-align:center;min-width:400px;">
+        <div class="node-icon">💾</div>
+        <div class="node-label" style="color:var(--blue)">Final Output Node</div>
+        <div class="node-sub">Model serialised via joblib to disk. Full pipeline config saved as JSON. LangGraph checkpoint stored for resume. TUI shows success modal with best hyperparameters, final score, and model file path. All within the terminal — no browser opened.</div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap;">
+          <span class="node-tag tag-sklearn">joblib · model.pkl</span>
+          <span class="node-tag tag-langgraph">LangGraph · Checkpoint</span>
+          <span class="node-tag tag-textual">Textual · Modal</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="h-line"></div>
+
+  <!-- Inter-layer communication -->
+  <div style="max-width:1100px;margin:0 auto;">
+    <div class="section-title" style="font-size:18px;margin-bottom:6px;">Inter-Layer Communication</div>
+    <div class="section-sub">How Textual, LangGraph, and Groq talk to each other without blocking</div>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-card-top">
+          <div class="info-icon">⚡</div>
+          <div class="info-name" style="color:var(--orange)">Groq Streaming → RichLog</div>
+        </div>
+        <div class="info-desc">Every Groq call uses <code>stream=True</code>. The async generator yields token deltas. Each delta calls <code>RichLog.write(token)</code> in-place, producing a typewriter effect. The LangGraph node awaits the full stream before advancing state.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top">
+          <div class="info-icon">🔄</div>
+          <div class="info-name" style="color:var(--purple)">LangGraph astream → Textual Messages</div>
+        </div>
+        <div class="info-desc"><code>graph.astream(state)</code> yields <code>{node_name: updated_state}</code> after each node. An <code>on_mount</code> background task iterates this generator and posts custom Textual <code>Message</code> events to update the pipeline tree, status icons, and right panel stats.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top">
+          <div class="info-icon">🪢</div>
+          <div class="info-name" style="color:var(--cyan)">User Input → asyncio.Queue</div>
+        </div>
+        <div class="info-desc">When a node needs user input, it sets <code>state.awaiting_input = True</code> and blocks on <code>await queue.get()</code>. Textual detects the flag, reveals the bottom <code>Input</code> bar, and on submit posts the answer into the queue. The node unblocks and continues.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top">
+          <div class="info-icon">🧵</div>
+          <div class="info-name" style="color:var(--green)">GA Thread → Textual Worker</div>
+        </div>
+        <div class="info-desc">DEAP runs synchronously in <code>run_worker(thread=True)</code>. After each generation the callback uses <code>call_soon_threadsafe</code> to post a <code>GAProgress</code> Textual Message. The app's handler updates the Sparkline widget without blocking the async event loop.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ TAB 2: AGENTS -->
+<div id="tab-agents" class="section">
+  <div class="section-title">Agent Specifications</div>
+  <div class="section-sub">Each agent is a LangGraph node with a Groq system prompt, structured JSON output schema, and specific Textual widgets it drives</div>
+
+  <div class="agent-grid">
+
+    <!-- EDA Agent -->
+    <div class="agent-card">
+      <div class="agent-card-header" style="background:var(--cyan-dim);">
+        <div class="agent-icon-wrap" style="background:rgba(121,192,255,0.15);">🔍</div>
+        <div>
+          <div class="agent-name" style="color:var(--cyan)">EDA Agent</div>
+          <div class="agent-lib">LangGraph Node · Groq JSON mode · plotext</div>
+        </div>
+      </div>
+      <div class="agent-card-body">
+        <div class="agent-section">
+          <div class="agent-section-title">System Prompt Role</div>
+          <div class="agent-section-body">Senior data scientist performing EDA. Given serialised DataFrame summary, output structured findings.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">JSON Output Schema</div>
+          <div class="io-row"><span class="io-label">→</span><span class="io-val">insights[]</span> <span style="color:var(--muted);font-size:10px;">finding, severity (low/med/high)</span></div>
+          <div class="io-row"><span class="io-label">→</span><span class="io-val">chart_recs[]</span> <span style="color:var(--muted);font-size:10px;">type, x_col, y_col, rationale</span></div>
+          <div class="io-row"><span class="io-label">→</span><span class="io-val">suggested_target</span> <span style="color:var(--muted);font-size:10px;">column name + confidence</span></div>
+          <div class="io-row"><span class="io-label">→</span><span class="io-val">outlier_indices[]</span> <span style="color:var(--muted);font-size:10px;">row idx, column, z_score</span></div>
+          <div class="io-row"><span class="io-label">→</span><span class="io-val">null_strategy{}</span> <span style="color:var(--muted);font-size:10px;">col → recommended fill</span></div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Native TUI Charts (plotext)</div>
+          <div class="agent-section-body">Histogram per numeric col, correlation heatmap (unicode colour blocks), scatter matrix for top correlated pairs, box plots for outlier visualisation, bar chart for categoricals — all rendered as strings stored in state, displayed via <code>Static</code> widgets.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Textual Widgets Used</div>
+          <div>
+            <span class="tui-widget">RichLog (streaming)</span>
+            <span class="tui-widget">Static (charts)</span>
+            <span class="tui-widget">DataTable (outliers)</span>
+            <span class="tui-widget">Input (target confirm)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Outlier Handler -->
+    <div class="agent-card">
+      <div class="agent-card-header" style="background:var(--yellow-dim);">
+        <div class="agent-icon-wrap" style="background:rgba(227,179,65,0.15);">🧹</div>
+        <div>
+          <div class="agent-name" style="color:var(--yellow)">Outlier Handler Node</div>
+          <div class="agent-lib">Conditional LangGraph Node · Groq · pandas</div>
+        </div>
+      </div>
+      <div class="agent-card-body">
+        <div class="agent-section">
+          <div class="agent-section-title">Activation Condition</div>
+          <div class="agent-section-body">Edge condition checks <code>len(state.outlier_indices) &gt; 0</code>. If false, this node is skipped entirely and the graph proceeds to Feature Engineering.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Strategy Options (user selects)</div>
+          <div class="io-row"><span class="io-label">①</span><span class="io-val">Remove rows</span> <span style="color:var(--muted);font-size:10px;">drop outlier indices from df</span></div>
+          <div class="io-row"><span class="io-label">②</span><span class="io-val">IQR Cap</span> <span style="color:var(--muted);font-size:10px;">clip at Q1-1.5×IQR / Q3+1.5×IQR</span></div>
+          <div class="io-row"><span class="io-label">③</span><span class="io-val">Log Transform</span> <span style="color:var(--muted);font-size:10px;">np.log1p on flagged columns</span></div>
+          <div class="io-row"><span class="io-label">④</span><span class="io-val">Flag Feature</span> <span style="color:var(--muted);font-size:10px;">add binary is_outlier_col column</span></div>
+          <div class="io-row"><span class="io-label">⑤</span><span class="io-val">Keep</span> <span style="color:var(--muted);font-size:10px;">ignore and proceed</span></div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Textual Widgets Used</div>
+          <div>
+            <span class="tui-widget">RadioSet (strategy pick)</span>
+            <span class="tui-widget">DataTable (before/after diff)</span>
+            <span class="tui-widget">Static (box plot)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature Engineer -->
+    <div class="agent-card">
+      <div class="agent-card-header" style="background:var(--orange-dim);">
+        <div class="agent-icon-wrap" style="background:rgba(240,136,62,0.15);">⚙️</div>
+        <div>
+          <div class="agent-name" style="color:var(--orange)">Feature Engineering Agent</div>
+          <div class="agent-lib">LangGraph Node · Groq · sandboxed eval</div>
+        </div>
+      </div>
+      <div class="agent-card-body">
+        <div class="agent-section">
+          <div class="agent-section-title">System Prompt Role</div>
+          <div class="agent-section-body">ML feature engineer. Given column names, dtypes, and EDA insights, propose derived features that could improve model signal. Output only safe, vectorised pandas expressions.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">JSON Output Schema</div>
+          <div class="io-row"><span class="io-label">→</span><span class="io-val">features[]</span></div>
+          <div class="io-row"><span class="io-label" style="min-width:60px;">  name</span><span class="io-val">new column name string</span></div>
+          <div class="io-row"><span class="io-label" style="min-width:60px;">  expr</span><span class="io-val">pandas expression (safe eval)</span></div>
+          <div class="io-row"><span class="io-label" style="min-width:60px;">  rationale</span><span class="io-val">why this feature adds signal</span></div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Safety Sandbox</div>
+          <div class="agent-section-body">Expressions are evaluated inside a restricted <code>eval()</code> with only <code>df</code>, <code>np</code>, and <code>pd</code> in scope. No imports, no builtins. Failed evals are caught, logged as warnings, and skipped.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Textual Widgets Used</div>
+          <div>
+            <span class="tui-widget">DataTable (live schema)</span>
+            <span class="tui-widget">RichLog (feature log)</span>
+            <span class="tui-widget">Checkbox (approve each)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GA Trainer -->
+    <div class="agent-card">
+      <div class="agent-card-header" style="background:var(--green-dim);">
+        <div class="agent-icon-wrap" style="background:rgba(86,211,100,0.15);">🧬</div>
+        <div>
+          <div class="agent-name" style="color:var(--green)">GA Trainer Node</div>
+          <div class="agent-lib">LangGraph Node · DEAP · sklearn · Worker Thread</div>
+        </div>
+      </div>
+      <div class="agent-card-body">
+        <div class="agent-section">
+          <div class="agent-section-title">Pre-training Config Form (TUI)</div>
+          <div class="agent-section-body">Before GA starts, user sees an editable Textual form: population size (default 50), generations (default 30), crossover prob (0.7), mutation prob (0.2), tournament size (3). All editable inline.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Model Selection</div>
+          <div class="io-row"><span class="io-label">Class.</span><span class="io-val">RandomForest, XGBoost, SVM, LogisticReg</span></div>
+          <div class="io-row"><span class="io-label">Reg.</span><span class="io-val">RandomForest, XGBoost, Ridge, SVR</span></div>
+          <div class="io-row"><span class="io-label">Groq</span><span class="io-val">recommends best fit from EDA insights</span></div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Real-time TUI Output</div>
+          <div class="agent-section-body">Per-generation: best fitness, avg fitness, diversity score streamed live. Sparkline widget shows fitness curve. Table shows top-5 chromosomes of current generation. Progress bar shows generation N/total.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Textual Widgets Used</div>
+          <div>
+            <span class="tui-widget">Input (GA params)</span>
+            <span class="tui-widget">Sparkline (fitness)</span>
+            <span class="tui-widget">ProgressBar</span>
+            <span class="tui-widget">DataTable (gen leaderboard)</span>
+            <span class="tui-widget">Static (plotext chart)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clustering Agent -->
+    <div class="agent-card">
+      <div class="agent-card-header" style="background:var(--purple-dim);">
+        <div class="agent-icon-wrap" style="background:rgba(188,140,255,0.15);">🔮</div>
+        <div>
+          <div class="agent-name" style="color:var(--purple)">Clustering Agent</div>
+          <div class="agent-lib">LangGraph Node · Groq · sklearn · plotext</div>
+        </div>
+      </div>
+      <div class="agent-card-body">
+        <div class="agent-section">
+          <div class="agent-section-title">Algorithm Selection (Groq-driven)</div>
+          <div class="io-row"><span class="io-label">Low-D</span><span class="io-val">KMeans or GMM</span></div>
+          <div class="io-row"><span class="io-label">Noisy</span><span class="io-val">DBSCAN</span></div>
+          <div class="io-row"><span class="io-label">Hier.</span><span class="io-val">Agglomerative + dendrogram</span></div>
+          <div class="io-row"><span class="io-label">High-D</span><span class="io-val">UMAP reduce → KMeans</span></div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Native TUI Visualisations</div>
+          <div class="agent-section-body">PCA 2D scatter plot with clusters colour-coded via ANSI escape codes in plotext. Dendrogram rendered as ASCII art tree for agglomerative. Elbow curve for KMeans k selection as plotext line chart.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Textual Widgets Used</div>
+          <div>
+            <span class="tui-widget">Static (scatter)</span>
+            <span class="tui-widget">Static (elbow curve)</span>
+            <span class="tui-widget">DataTable (cluster stats)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Evaluator Agent -->
+    <div class="agent-card">
+      <div class="agent-card-header" style="background:var(--blue-dim);">
+        <div class="agent-icon-wrap" style="background:rgba(56,139,253,0.15);">📈</div>
+        <div>
+          <div class="agent-name" style="color:var(--blue)">Evaluator Agent</div>
+          <div class="agent-lib">LangGraph Node · Groq · sklearn metrics · plotext</div>
+        </div>
+      </div>
+      <div class="agent-card-body">
+        <div class="agent-section">
+          <div class="agent-section-title">Supervised Outputs</div>
+          <div class="io-row"><span class="io-label">①</span><span class="io-val">Confusion matrix</span><span style="color:var(--muted);font-size:10px;margin-left:6px;">heatmap via unicode blocks</span></div>
+          <div class="io-row"><span class="io-label">②</span><span class="io-val">ROC curve</span><span style="color:var(--muted);font-size:10px;margin-left:6px;">plotext line chart</span></div>
+          <div class="io-row"><span class="io-label">③</span><span class="io-val">Feature importance</span><span style="color:var(--muted);font-size:10px;margin-left:6px;">horizontal bar chart</span></div>
+          <div class="io-row"><span class="io-label">④</span><span class="io-val">Classification report</span><span style="color:var(--muted);font-size:10px;margin-left:6px;">rich Table widget</span></div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Groq Narration</div>
+          <div class="agent-section-body">Streams a 3-5 sentence interpretation of results contextualised to the EDA findings — e.g. "Class 2 underperformance matches the 47-sample count flagged in EDA." Provides actionable next steps.</div>
+        </div>
+        <div class="agent-section">
+          <div class="agent-section-title">Textual Widgets Used</div>
+          <div>
+            <span class="tui-widget">RichLog (narration)</span>
+            <span class="tui-widget">Static (confusion matrix)</span>
+            <span class="tui-widget">Static (ROC)</span>
+            <span class="tui-widget">Table (report)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ TAB 3: TUI -->
+<div id="tab-tui" class="section">
+  <div class="section-title">TUI Layout Anatomy</div>
+  <div class="section-sub">Three-column layout — all native Textual widgets, no browser, no external windows. Shown below: mid-training state of supervised path.</div>
+
+  <div class="tui-container">
+    <div class="tui-titlebar">
+      <div class="tui-dot r"></div>
+      <div class="tui-dot y"></div>
+      <div class="tui-dot g"></div>
+      <div class="tui-title-text">automl-platform v0.1 · supervised · iris_dataset.csv · python 3.11</div>
+    </div>
+
+    <div class="tui-body">
+
+      <!-- LEFT: Pipeline tree -->
+      <div class="tui-panel">
+        <div class="tui-panel-title">▸ Pipeline · Tree</div>
+        <div class="tui-panel-body">
+
+          <div class="pipeline-item done">
+            <span class="pi-icon">✅</span>
+            <span class="pi-label">Orchestrator</span>
+          </div>
+          <div class="pi-children">
+            <div class="pipeline-item done">
+              <span class="pi-icon">✅</span>
+              <span class="pi-label">Path: Supervised</span>
+            </div>
+          </div>
+
+          <div class="pipeline-item done" style="margin-top:4px;">
+            <span class="pi-icon">✅</span>
+            <span class="pi-label">EDA Agent</span>
+          </div>
+          <div class="pi-children">
+            <div class="pipeline-item done">
+              <span class="pi-icon">✅</span>
+              <span class="pi-label">5 insights</span>
+            </div>
+            <div class="pipeline-item done">
+              <span class="pi-icon">✅</span>
+              <span class="pi-label">4 charts</span>
+            </div>
+            <div class="pipeline-item done">
+              <span class="pi-icon">✅</span>
+              <span class="pi-label">Target: species</span>
+            </div>
+          </div>
+
+          <div class="pipeline-item done" style="margin-top:4px;">
+            <span class="pi-icon">✅</span>
+            <span class="pi-label">Outlier Handler</span>
+          </div>
+          <div class="pi-children">
+            <div class="pipeline-item done">
+              <span class="pi-icon">✅</span>
+              <span class="pi-label">3 outliers → capped</span>
+            </div>
+          </div>
+
+          <div class="pipeline-item done" style="margin-top:4px;">
+            <span class="pi-icon">✅</span>
+            <span class="pi-label">Feature Engineer</span>
+          </div>
+          <div class="pi-children">
+            <div class="pipeline-item done">
+              <span class="pi-icon">✅</span>
+              <span class="pi-label">+3 new features</span>
+            </div>
+          </div>
+
+          <div class="pipeline-item running" style="margin-top:4px;background:var(--cyan-dim);border-radius:4px;">
+            <span class="pi-icon">🔄</span>
+            <span class="pi-label">GA Trainer</span>
+          </div>
+          <div class="pi-children">
+            <div class="pipeline-item running">
+              <span class="pi-icon">⬜</span>
+              <span class="pi-label" style="color:var(--cyan);">Gen 14 / 30</span>
+            </div>
+            <div class="pipeline-item">
+              <span class="pi-icon">⬜</span>
+              <span class="pi-label" style="color:var(--muted);">Best: 0.934</span>
+            </div>
+          </div>
+
+          <div class="pipeline-item" style="margin-top:4px;opacity:0.4;">
+            <span class="pi-icon">⬜</span>
+            <span class="pi-label" style="color:var(--muted);">Evaluator</span>
+          </div>
+          <div class="pipeline-item" style="margin-top:4px;opacity:0.4;">
+            <span class="pi-icon">⬜</span>
+            <span class="pi-label" style="color:var(--muted);">Export</span>
+          </div>
+
+          <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:12px;">
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Keyboard</div>
+            <div style="font-size:10px;color:var(--muted);line-height:1.8;">
+              <span style="color:var(--cyan)">ctrl+c</span> quit<br>
+              <span style="color:var(--cyan)">ctrl+s</span> save state<br>
+              <span style="color:var(--cyan)">ctrl+e</span> export report<br>
+              <span style="color:var(--cyan)">tab</span> focus panels<br>
+              <span style="color:var(--cyan)">↑↓</span> scroll log
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CENTER: Main log + chart -->
+      <div class="tui-panel" style="border-right:1px solid var(--border);flex:1;">
+        <div class="tui-panel-title">▸ Agent Log · RichLog + Static Charts</div>
+        <div style="overflow-y:auto;flex:1;">
+
+          <div class="log-area">
+            <div class="log-line muted">─── EDA Agent ──────────────────────────────────────</div>
+            <div class="log-line agent">● EDA Agent  analysing 150×5 dataset...</div>
+            <div class="log-line info">  Found 5 numeric features, 1 categorical target.</div>
+            <div class="log-line success">  ✓ No missing values detected.</div>
+            <div class="log-line warn">  ⚠ 3 outliers in sepal_length (z &gt; 2.8)</div>
+            <div class="log-line info">  Suggested target: <span style="color:var(--green)">species</span> (confidence: 0.97)</div>
+            <div class="log-line muted" style="margin-top:6px;">─── Feature Engineer ────────────────────────────────</div>
+            <div class="log-line agent">● Feature Agent  proposing derived features...</div>
+            <div class="log-line stream">  + petal_area = df['petal_length'] * df['petal_width']</div>
+            <div class="log-line stream">  + sepal_ratio = df['sepal_length'] / df['sepal_width']</div>
+            <div class="log-line stream">  + petal_sepal_ratio = df['petal_area'] / df['sepal_length']</div>
+            <div class="log-line success">  ✓ 3 features validated and applied. Shape: 150×8</div>
+          </div>
+
+          <!-- Chart block: correlation heatmap -->
+          <div class="chart-block">
+            <div class="chart-title-bar">📊 Correlation Heatmap · plotext unicode render</div>
+            <div class="chart-body">     sl    sw    pl    pw    pa
+sl  <span style="color:#56d364">████</span> <span style="color:#e3b341">░░░░</span> <span style="color:#79c0ff">▓▓▓░</span> <span style="color:#79c0ff">▓▓░░</span> <span style="color:#79c0ff">▓▓▓░</span>
+sw  <span style="color:#e3b341">░░░░</span> <span style="color:#56d364">████</span> <span style="color:#ff7b72">▒▒░░</span> <span style="color:#ff7b72">▒░░░</span> <span style="color:#ff7b72">▒▒░░</span>
+pl  <span style="color:#79c0ff">▓▓▓░</span> <span style="color:#ff7b72">▒▒░░</span> <span style="color:#56d364">████</span> <span style="color:#56d364">███▓</span> <span style="color:#56d364">████</span>
+pw  <span style="color:#79c0ff">▓▓░░</span> <span style="color:#ff7b72">▒░░░</span> <span style="color:#56d364">███▓</span> <span style="color:#56d364">████</span> <span style="color:#56d364">███▓</span>
+pa  <span style="color:#79c0ff">▓▓▓░</span> <span style="color:#ff7b72">▒▒░░</span> <span style="color:#56d364">████</span> <span style="color:#56d364">███▓</span> <span style="color:#56d364">████</span>
+<span style="color:var(--muted)">████ strong  ▓▓▓▓ moderate  ░░░░ weak  ▒▒▒▒ neg</span></div>
+          </div>
+
+          <!-- GA progress log -->
+          <div class="log-area">
+            <div class="log-line muted" style="margin-top:4px;">─── GA Trainer ─────────────────────── [running] ────</div>
+            <div class="log-line agent">● GA Trainer  RandomForest · pop=50 · gen=30</div>
+            <div class="log-line info">  Gen  1  best=0.721  avg=0.654  diversity=0.89</div>
+            <div class="log-line info">  Gen  5  best=0.834  avg=0.791  diversity=0.72</div>
+            <div class="log-line info">  Gen 10  best=0.901  avg=0.867  diversity=0.61</div>
+            <div class="log-line success">  Gen 14  best=0.934  avg=0.912  diversity=0.54</div>
+            <div class="log-line stream">  Gen 15  <span style="color:var(--cyan)">▌</span><span style="animation:blink 1s infinite;color:var(--cyan)">█</span></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- RIGHT: Stats + sparkline + data preview -->
+      <div class="tui-panel" style="border-right:none;">
+        <div class="tui-panel-title">▸ Stats · Data · GA Progress</div>
+        <div class="tui-panel-body">
+
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Dataset</div>
+          <div class="stat-row"><span class="stat-key">shape</span><span class="stat-val">150 × 8</span></div>
+          <div class="stat-row"><span class="stat-key">target</span><span class="stat-val" style="color:var(--green)">species</span></div>
+          <div class="stat-row"><span class="stat-key">task</span><span class="stat-val">Classification</span></div>
+          <div class="stat-row"><span class="stat-key">classes</span><span class="stat-val">3</span></div>
+          <div class="stat-row"><span class="stat-key">train/test</span><span class="stat-val">120 / 30</span></div>
+          <div class="stat-row" style="border:none;"><span class="stat-key">new features</span><span class="stat-val" style="color:var(--orange)">+3</span></div>
+
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin:14px 0 8px;">GA · Generation 14/30</div>
+          <div class="stat-row"><span class="stat-key">best fitness</span><span class="stat-val" style="color:var(--green)">0.934</span></div>
+          <div class="stat-row"><span class="stat-key">avg fitness</span><span class="stat-val">0.912</span></div>
+          <div class="stat-row" style="border:none;"><span class="stat-key">diversity</span><span class="stat-val">0.54</span></div>
+
+          <!-- Sparkline -->
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin:10px 0 4px;">Fitness Curve · Sparkline</div>
+          <div class="sparkline">
+            <div class="spark-bar" style="height:20%;opacity:0.5;"></div>
+            <div class="spark-bar" style="height:28%;"></div>
+            <div class="spark-bar" style="height:35%;"></div>
+            <div class="spark-bar" style="height:48%;"></div>
+            <div class="spark-bar" style="height:55%;"></div>
+            <div class="spark-bar" style="height:63%;"></div>
+            <div class="spark-bar" style="height:70%;"></div>
+            <div class="spark-bar" style="height:74%;"></div>
+            <div class="spark-bar" style="height:80%;"></div>
+            <div class="spark-bar" style="height:85%;"></div>
+            <div class="spark-bar" style="height:88%;"></div>
+            <div class="spark-bar" style="height:89%;"></div>
+            <div class="spark-bar" style="height:91%;"></div>
+            <div class="spark-bar" style="height:93%;background:var(--green);"></div>
+            <div class="spark-bar" style="height:60%;background:var(--muted2);opacity:0.4;"></div>
+          </div>
+
+          <!-- Data preview -->
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin:10px 0 6px;">Data Preview · DataTable</div>
+          <table class="mini-table">
+            <tr><th>sl</th><th>sw</th><th>pl</th><th>pa</th><th>species</th></tr>
+            <tr><td>5.1</td><td>3.5</td><td>1.4</td><td>0.28</td><td style="color:var(--green)">0</td></tr>
+            <tr><td>6.4</td><td>3.2</td><td>4.5</td><td>6.75</td><td style="color:var(--yellow)">1</td></tr>
+            <tr><td>5.9</td><td>3.0</td><td>5.1</td><td>9.18</td><td style="color:var(--orange)">2</td></tr>
+            <tr><td>4.6</td><td>3.1</td><td>1.5</td><td>0.30</td><td style="color:var(--green)">0</td></tr>
+          </table>
+
+        </div>
+      </div>
+
+    </div><!-- end tui-body grid -->
+
+    <!-- Bottom input bar -->
+    <div class="tui-input-bar">
+      <span class="tui-prompt">GA running —</span>
+      <span style="font-size:11px;color:var(--muted)">ctrl+p to pause · ctrl+s to checkpoint · waiting for generation 15...</span>
+      <span class="tui-input-hint">ctrl+c to quit</span>
+    </div>
+
+  </div><!-- end tui-container -->
+
+  <div style="margin-top:28px;max-width:1100px;margin-left:auto;margin-right:auto;">
+    <div class="section-title" style="font-size:16px;margin-bottom:16px;">Widget-to-Textual Class Mapping</div>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-card-top"><div class="info-icon">🌲</div><div class="info-name" style="color:var(--cyan)">Left Panel — Tree</div></div>
+        <div class="info-desc">Textual <code>Tree</code> widget with custom <code>TreeNode</code> data. Status icons updated by posting <code>UpdateNodeStatus</code> messages from the LangGraph stream handler. Supports keyboard navigation.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top"><div class="info-icon">📜</div><div class="info-name" style="color:var(--orange)">Center Log — RichLog</div></div>
+        <div class="info-desc">Textual <code>RichLog</code> with <code>markup=True</code>. Groq token stream writes directly into it via <code>write()</code> in the async generator loop. Charts injected as <code>Static(renderable)</code> mounts.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top"><div class="info-icon">📊</div><div class="info-name" style="color:var(--green)">Charts — Static + plotext</div></div>
+        <div class="info-desc"><code>plotext</code> renders to a string buffer via <code>plt.build()</code>. The string is wrapped in a Rich <code>Text</code> object and mounted as a <code>Static</code> widget inside the center scroll area. Fully native.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top"><div class="info-icon">⚡</div><div class="info-name" style="color:var(--purple)">Right Stats — DataTable + Sparkline</div></div>
+        <div class="info-desc">Textual <code>DataTable</code> for the data preview, <code>Sparkline</code> for fitness curve, custom <code>Grid</code> layout for stat rows. All updated reactively via <code>reactive()</code> descriptors when MLState changes.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top"><div class="info-icon">⌨️</div><div class="info-name" style="color:var(--yellow)">Bottom Input Bar</div></div>
+        <div class="info-desc">Textual <code>Input</code> widget hidden via CSS <code>display:none</code> by default. When <code>state.awaiting_input = True</code>, a <code>reveal_input(prompt)</code> method sets CSS, updates label, focuses input. On submit, calls <code>queue.put()</code>.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-top"><div class="info-icon">🎛️</div><div class="info-name" style="color:var(--pink)">Modal Dialogs</div></div>
+        <div class="info-desc">Textual <code>ModalScreen</code> subclass for: strategy selection (outlier), GA config form, final results summary. Pushed via <code>app.push_screen()</code> and dismissed with result callback.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ TAB 4: GA -->
+<div id="tab-ga" class="section">
+  <div class="section-title">Genetic Algorithm Deep-Dive</div>
+  <div class="section-sub">Chromosome encoding, DEAP setup, fitness evaluation, and live TUI integration — all within the LangGraph node boundary</div>
+
+  <div class="ga-container">
+
+    <!-- Chromosome visual -->
+    <div style="margin-bottom:28px;">
+      <div style="font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:600;margin-bottom:6px;color:var(--white);">Chromosome Encoding — RandomForest Example</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:16px;">Each gene is an integer index into a discrete parameter space. The chromosome is a fixed-length list — DEAP encodes, decodes, mutates, and crosses over these integers.</div>
+      <div class="chromosome">
+        <div class="gene c1 tooltip">
+          <div class="gene-name">gene[0] n_estimators</div>
+          <div class="gene-val">200</div>
+          <div class="tip">Range: 10–500 (step 10). Maps to actual int via gene_map[0][gene[0]]</div>
+        </div>
+        <div class="gene c2 tooltip">
+          <div class="gene-name">gene[1] max_depth</div>
+          <div class="gene-val">12</div>
+          <div class="tip">Range: 2–30. Index 0 maps to None (unlimited depth).</div>
+        </div>
+        <div class="gene c3 tooltip">
+          <div class="gene-name">gene[2] min_samples_split</div>
+          <div class="gene-val">5</div>
+          <div class="tip">Range: 2–20</div>
+        </div>
+        <div class="gene c4 tooltip">
+          <div class="gene-name">gene[3] min_samples_leaf</div>
+          <div class="gene-val">2</div>
+          <div class="tip">Range: 1–10</div>
+        </div>
+        <div class="gene c5 tooltip">
+          <div class="gene-name">gene[4] max_features</div>
+          <div class="gene-val">sqrt</div>
+          <div class="tip">Discrete: [sqrt, log2, 0.3, 0.5, 0.7, None]. Index into list.</div>
+        </div>
+        <div class="gene c1 tooltip">
+          <div class="gene-name">gene[5] criterion</div>
+          <div class="gene-val">gini</div>
+          <div class="tip">Discrete: [gini, entropy, log_loss]</div>
+        </div>
+        <div class="gene c2 tooltip">
+          <div class="gene-name">gene[6] bootstrap</div>
+          <div class="gene-val">True</div>
+          <div class="tip">Binary: [True, False]</div>
+        </div>
+        <div class="gene c3 tooltip">
+          <div class="gene-name">gene[7] class_weight</div>
+          <div class="gene-val">balanced</div>
+          <div class="tip">Discrete: [None, balanced, balanced_subsample]</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;">💡 Hover each gene to see encoding details &nbsp;·&nbsp; XGBoost has 11 genes, SVM has 6, Logistic Regression has 4</div>
+    </div>
+
+    <!-- Fitness chart -->
+    <div class="fitness-chart" style="margin-bottom:28px;">
+      <div class="fitness-chart-title">
+        <span style="color:var(--green)">●</span> Live Fitness Evolution — rendered natively in TUI via plotext
+        <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:auto;">Sparkline widget + per-gen DataTable update</span>
+      </div>
+      <div class="fc-area">
+        <svg class="fc-svg" viewBox="0 0 600 130" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="fitGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#56d364" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#56d364" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <!-- grid lines -->
+          <line x1="0" y1="26" x2="600" y2="26" stroke="#21262d" stroke-width="1"/>
+          <line x1="0" y1="52" x2="600" y2="52" stroke="#21262d" stroke-width="1"/>
+          <line x1="0" y1="78" x2="600" y2="78" stroke="#21262d" stroke-width="1"/>
+          <line x1="0" y1="104" x2="600" y2="104" stroke="#21262d" stroke-width="1"/>
+          <!-- axis labels -->
+          <text x="4" y="23" fill="#484f58" font-size="9" font-family="JetBrains Mono">1.00</text>
+          <text x="4" y="49" fill="#484f58" font-size="9" font-family="JetBrains Mono">0.90</text>
+          <text x="4" y="75" fill="#484f58" font-size="9" font-family="JetBrains Mono">0.80</text>
+          <text x="4" y="101" fill="#484f58" font-size="9" font-family="JetBrains Mono">0.70</text>
+          <!-- avg fitness area fill -->
+          <path d="M30,95 L50,88 L70,82 L90,78 L110,74 L130,70 L150,68 L170,65 L190,63 L210,61 L230,60 L250,58 L270,57 L290,57 L310,56 L320,130 L30,130 Z" fill="url(#fitGrad)" opacity="0.5"/>
+          <!-- avg fitness line -->
+          <polyline points="30,95 50,88 70,82 90,78 110,74 130,70 150,68 170,65 190,63 210,61 230,60 250,58 270,57 290,57 310,56" fill="none" stroke="#56d364" stroke-width="1.5" stroke-dasharray="4,2" opacity="0.6"/>
+          <!-- best fitness line -->
+          <polyline points="30,85 50,75 70,65 90,56 110,50 130,44 150,40 170,37 190,34 210,32 230,30 250,29 270,28 290,28 310,27" fill="none" stroke="#56d364" stroke-width="2.5"/>
+          <!-- current best dot -->
+          <circle cx="310" cy="27" r="5" fill="#56d364"/>
+          <text x="318" y="26" fill="#56d364" font-size="10" font-family="JetBrains Mono" font-weight="bold">0.934</text>
+          <!-- dashed remaining -->
+          <polyline points="310,27 340,26 370,25.5 400,25 430,24.5 460,24 500,23.5" fill="none" stroke="#30363d" stroke-width="1.5" stroke-dasharray="3,3"/>
+          <text x="505" y="23" fill="#484f58" font-size="9">projected</text>
+        </svg>
+      </div>
+      <div class="fc-labels">
+        <span>Gen 1</span><span>Gen 5</span><span>Gen 10</span><span>Gen 15 ←</span><span>Gen 20</span><span>Gen 25</span><span>Gen 30</span>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:10px;font-size:10px;">
+        <span><span style="color:var(--green)">──</span> Best fitness</span>
+        <span><span style="color:var(--green);opacity:0.6">- -</span> Avg fitness</span>
+        <span><span style="color:var(--border2)">- -</span> Projected</span>
+        <span style="margin-left:auto;color:var(--muted)">3-fold CV · metric: accuracy</span>
+      </div>
+    </div>
+
+    <div class="ga-grid">
+      <!-- DEAP setup pseudocode -->
+      <div class="code-block">
+        <div class="code-header">
+          <div class="code-dot"></div>
+          <span>DEAP Setup — ga_trainer_node.py (conceptual)</span>
+        </div>
+        <div class="code-body">
+<span class="cm"># Chromosome: list of gene indices</span>
+<span class="kw">GENE_SPACES</span> = {
+  <span class="str">"n_estimators"</span>: <span class="fn">list</span>(<span class="fn">range</span>(<span class="num">10</span>, <span class="num">501</span>, <span class="num">10</span>)),
+  <span class="str">"max_depth"</span>: [<span class="kw">None</span>] + <span class="fn">list</span>(<span class="fn">range</span>(<span class="num">2</span>, <span class="num">31</span>)),
+  <span class="str">"max_features"</span>: [<span class="str">"sqrt"</span>, <span class="str">"log2"</span>, <span class="num">0.3</span>, <span class="num">0.5</span>],
+  <span class="str">"criterion"</span>: [<span class="str">"gini"</span>, <span class="str">"entropy"</span>],
+  <span class="cm">...8 genes total for RF...</span>
+}
+
+creator.<span class="fn">create</span>(<span class="str">"FitnessMax"</span>, base.Fitness,
+              weights=(<span class="num">1.0</span>,))
+creator.<span class="fn">create</span>(<span class="str">"Individual"</span>, <span class="fn">list</span>,
+              fitness=creator.FitnessMax)
+
+<span class="kw">def</span> <span class="fn">decode_chromosome</span>(ind):
+    <span class="kw">return</span> {
+        k: GENE_SPACES[k][ind[i]]
+        <span class="kw">for</span> i, k <span class="kw">in</span> <span class="fn">enumerate</span>(GENE_SPACES)
+    }
+
+<span class="kw">def</span> <span class="fn">evaluate</span>(individual):
+    params = <span class="fn">decode_chromosome</span>(individual)
+    model = <span class="cls">RandomForestClassifier</span>(**params)
+    scores = <span class="fn">cross_val_score</span>(
+        model, X_train, y_train, cv=<span class="num">3</span>
+    )
+    <span class="kw">return</span> (scores.<span class="fn">mean</span>(),)  <span class="cm"># tuple for DEAP</span>
+
+<span class="cm"># After each generation — post to TUI</span>
+<span class="kw">def</span> <span class="fn">gen_callback</span>(gen, best, avg):
+    loop.<span class="fn">call_soon_threadsafe</span>(
+        q.<span class="fn">put_nowait</span>,
+        GAProgress(gen, best, avg)
+    )
+</div>
+      </div>
+
+      <!-- GA Flow visual -->
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:600;margin-bottom:16px;">Evolutionary Loop</div>
+        <div style="display:flex;flex-direction:column;gap:0;">
+
+          <div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:14px 16px;">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;color:var(--cyan);margin-bottom:6px;">① Initialise Population</div>
+            <div style="font-size:11px;color:var(--muted);">50 random chromosomes. Each gene sampled uniformly from its space. Diverse initial population avoids local optima.</div>
+          </div>
+          <div style="text-align:center;padding:6px;color:var(--border2);">▼</div>
+
+          <div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:14px 16px;">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;color:var(--yellow);margin-bottom:6px;">② Evaluate Fitness</div>
+            <div style="font-size:11px;color:var(--muted);">3-fold CV on training split. Parallelised via <code>joblib</code> with <code>n_jobs=-1</code>. Results cached by chromosome hash to avoid re-evaluating identical individuals.</div>
+          </div>
+          <div style="text-align:center;padding:6px;color:var(--border2);">▼</div>
+
+          <div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:14px 16px;">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;color:var(--orange);margin-bottom:6px;">③ Selection</div>
+            <div style="font-size:11px;color:var(--muted);">Tournament selection (size=3). 3 individuals drawn at random; fittest survives. Preserves diversity better than roulette wheel at small populations.</div>
+          </div>
+          <div style="text-align:center;padding:6px;color:var(--border2);">▼</div>
+
+          <div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:14px 16px;">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;color:var(--purple);margin-bottom:6px;">④ Crossover + Mutation</div>
+            <div style="font-size:11px;color:var(--muted);">Two-point crossover (p=0.7) swaps gene segments. Uniform integer mutation (p=0.2) randomly reassigns individual genes. Hall of Fame preserves top-5 elites across generations.</div>
+          </div>
+          <div style="text-align:center;padding:6px;color:var(--border2);">▼</div>
+
+          <div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:14px 16px;display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+              <div style="font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;color:var(--green);margin-bottom:6px;">⑤ Post Progress → TUI</div>
+              <div style="font-size:11px;color:var(--muted);">gen_callback fires. Textual Sparkline + DataTable update. If N generations complete or fitness plateau detected (Δ &lt; 0.001 for 5 gens), convergence declared.</div>
+            </div>
+            <div style="font-size:24px;">📡</div>
+          </div>
+          <div style="text-align:center;padding:6px;color:var(--border2);">↺ repeat</div>
+
+          <div style="background:var(--green-dim);border:1px solid var(--green);border-radius:8px;padding:14px 16px;">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;color:var(--green);margin-bottom:6px;">⑥ Best Chromosome → Retrain</div>
+            <div style="font-size:11px;color:var(--muted);">Hall of Fame champion decoded to params. Model retrained on full training set (not just CV fold). Passed to Evaluator node. Chromosome saved to state for reproducibility.</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ TAB 5: STATE -->
+<div id="tab-state" class="section">
+  <div class="section-title">LangGraph MLState Schema</div>
+  <div class="section-sub">The TypedDict that flows through every node — every agent reads from and writes to this single source of truth</div>
+
+  <div class="schema-grid">
+
+    <div class="schema-card">
+      <div class="schema-card-title"><span>📂</span> Data & Entry</div>
+      <div class="schema-card-body">
+        <div class="schema-field"><span class="sf-key">dataset_path</span><span class="sf-type">str</span><span class="sf-desc">absolute CSV path</span></div>
+        <div class="schema-field"><span class="sf-key">description</span><span class="sf-type">str</span><span class="sf-desc">user's natural language description</span></div>
+        <div class="schema-field"><span class="sf-key">df</span><span class="sf-type">DataFrame</span><span class="sf-desc">live working dataframe, mutated in place by each node</span></div>
+        <div class="schema-field"><span class="sf-key">df_original</span><span class="sf-type">DataFrame</span><span class="sf-desc">immutable snapshot for diff display</span></div>
+        <div class="schema-field"><span class="sf-key">path</span><span class="sf-type">Literal</span><span class="sf-desc">explore | supervised | unsupervised</span></div>
+      </div>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-title"><span>🔍</span> EDA Results</div>
+      <div class="schema-card-body">
+        <div class="schema-field"><span class="sf-key">eda_insights</span><span class="sf-type">list[dict]</span><span class="sf-desc">finding, severity per insight</span></div>
+        <div class="schema-field"><span class="sf-key">chart_recs</span><span class="sf-type">list[dict]</span><span class="sf-desc">type, cols, rationale per chart</span></div>
+        <div class="schema-field"><span class="sf-key">rendered_charts</span><span class="sf-type">list[str]</span><span class="sf-desc">plotext unicode strings for TUI display</span></div>
+        <div class="schema-field"><span class="sf-key">null_strategy</span><span class="sf-type">dict</span><span class="sf-desc">col → fill strategy map</span></div>
+        <div class="schema-field"><span class="sf-key">outlier_indices</span><span class="sf-type">list[int]</span><span class="sf-desc">row indices with z_score and col</span></div>
+        <div class="schema-field"><span class="sf-key">suggested_target</span><span class="sf-type">str</span><span class="sf-desc">LLM-recommended target column</span></div>
+        <div class="schema-field"><span class="sf-key">confirmed_target</span><span class="sf-type">str</span><span class="sf-desc">user-confirmed target column</span></div>
+      </div>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-title"><span>⚙️</span> Feature Engineering</div>
+      <div class="schema-card-body">
+        <div class="schema-field"><span class="sf-key">feature_proposals</span><span class="sf-type">list[dict]</span><span class="sf-desc">name, expr, rationale per proposal</span></div>
+        <div class="schema-field"><span class="sf-key">features_applied</span><span class="sf-type">list[str]</span><span class="sf-desc">column names successfully created</span></div>
+        <div class="schema-field"><span class="sf-key">features_rejected</span><span class="sf-type">list[str]</span><span class="sf-desc">failed evals or user-rejected proposals</span></div>
+        <div class="schema-field"><span class="sf-key">outlier_strategy</span><span class="sf-type">str</span><span class="sf-desc">remove | cap | log | flag | keep</span></div>
+      </div>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-title"><span>🧬</span> GA Training</div>
+      <div class="schema-card-body">
+        <div class="schema-field"><span class="sf-key">ga_config</span><span class="sf-type">dict</span><span class="sf-desc">pop_size, n_gen, cx_prob, mut_prob, tourney</span></div>
+        <div class="schema-field"><span class="sf-key">model_type</span><span class="sf-type">str</span><span class="sf-desc">RandomForest | XGBoost | SVM | LogReg | ...</span></div>
+        <div class="schema-field"><span class="sf-key">gene_spaces</span><span class="sf-type">dict</span><span class="sf-desc">param_name → list of valid values</span></div>
+        <div class="schema-field"><span class="sf-key">ga_history</span><span class="sf-type">list[dict]</span><span class="sf-desc">per-gen: gen_n, best_fit, avg_fit, diversity</span></div>
+        <div class="schema-field"><span class="sf-key">best_chromosome</span><span class="sf-type">list[int]</span><span class="sf-desc">hall-of-fame winner gene indices</span></div>
+        <div class="schema-field"><span class="sf-key">best_params</span><span class="sf-type">dict</span><span class="sf-desc">decoded hyperparameters</span></div>
+        <div class="schema-field"><span class="sf-key">best_cv_score</span><span class="sf-type">float</span><span class="sf-desc">best 3-fold CV metric</span></div>
+      </div>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-title"><span>📈</span> Evaluation & Output</div>
+      <div class="schema-card-body">
+        <div class="schema-field"><span class="sf-key">model</span><span class="sf-type">object</span><span class="sf-desc">trained sklearn estimator</span></div>
+        <div class="schema-field"><span class="sf-key">test_score</span><span class="sf-type">float</span><span class="sf-desc">final held-out test set metric</span></div>
+        <div class="schema-field"><span class="sf-key">eval_report</span><span class="sf-type">dict</span><span class="sf-desc">classification/regression report dict</span></div>
+        <div class="schema-field"><span class="sf-key">confusion_matrix</span><span class="sf-type">ndarray</span><span class="sf-desc">sklearn confusion matrix array</span></div>
+        <div class="schema-field"><span class="sf-key">feature_importances</span><span class="sf-type">dict</span><span class="sf-desc">col → importance score</span></div>
+        <div class="schema-field"><span class="sf-key">eval_narration</span><span class="sf-type">str</span><span class="sf-desc">Groq-generated result interpretation</span></div>
+        <div class="schema-field"><span class="sf-key">model_path</span><span class="sf-type">str</span><span class="sf-desc">path to joblib serialised model file</span></div>
+      </div>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-card-title"><span>🔗</span> Control Flow & TUI</div>
+      <div class="schema-card-body">
+        <div class="schema-field"><span class="sf-key">current_node</span><span class="sf-type">str</span><span class="sf-desc">name of currently executing LangGraph node</span></div>
+        <div class="schema-field"><span class="sf-key">awaiting_input</span><span class="sf-type">bool</span><span class="sf-desc">signals TUI to reveal input bar</span></div>
+        <div class="schema-field"><span class="sf-key">input_prompt</span><span class="sf-type">str</span><span class="sf-desc">question text to display to user</span></div>
+        <div class="schema-field"><span class="sf-key">user_response</span><span class="sf-type">str | None</span><span class="sf-desc">answer from queue.get()</span></div>
+        <div class="schema-field"><span class="sf-key">messages</span><span class="sf-type">list[dict]</span><span class="sf-desc">full conversation history for each agent (role, content)</span></div>
+        <div class="schema-field"><span class="sf-key">errors</span><span class="sf-type">list[str]</span><span class="sf-desc">non-fatal errors logged for display</span></div>
+        <div class="schema-field"><span class="sf-key">checkpoint_id</span><span class="sf-type">str</span><span class="sf-desc">LangGraph checkpoint UUID for resume</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="max-width:1100px;margin:32px auto 0;">
+    <div class="code-block">
+      <div class="code-header"><div class="code-dot"></div><span>State Initialisation Pattern — ml_state.py</span></div>
+      <div class="code-body"><span class="kw">from</span> typing <span class="kw">import</span> TypedDict, Optional, Literal
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+<span class="kw">class</span> <span class="cls">MLState</span>(TypedDict):
+    <span class="cm"># ── data layer</span>
+    dataset_path: str
+    description: str
+    df: pd.DataFrame
+    df_original: pd.DataFrame
+    path: Literal[<span class="str">"explore"</span>, <span class="str">"supervised"</span>, <span class="str">"unsupervised"</span>]
+
+    <span class="cm"># ── eda layer</span>
+    eda_insights: <span class="fn">list</span>[dict]
+    rendered_charts: <span class="fn">list</span>[str]
+    outlier_indices: <span class="fn">list</span>[int]
+    confirmed_target: Optional[str]
+
+    <span class="cm"># ── feature engineering layer</span>
+    features_applied: <span class="fn">list</span>[str]
+    outlier_strategy: str
+
+    <span class="cm"># ── ga training layer</span>
+    ga_config: dict
+    ga_history: <span class="fn">list</span>[dict]
+    best_params: dict
+    best_cv_score: float
+    model: object
+
+    <span class="cm"># ── tui control</span>
+    current_node: str
+    awaiting_input: bool
+    input_prompt: str
+    user_response: Optional[str]
+    messages: <span class="fn">list</span>[dict]
+    errors: <span class="fn">list</span>[str]
+</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function showTab(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+  window.scrollTo({top:64, behavior:'smooth'});
+}
+
+// Animate sparkline bars on load
+document.querySelectorAll('.spark-bar').forEach((bar, i) => {
+  bar.style.transition = `height 0.4s ease ${i * 0.05}s`;
+});
+
+// Animate GA fitness chart path on tab switch
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    // small delay for CSS animation
+    setTimeout(() => {}, 100);
+  });
+});
+</script>
+
+</body>
+</html>
