@@ -21,6 +21,100 @@ from joblib import Parallel, delayed
 from .metrics import calculate_metrics
 
 
+def _evaluate_genome_worker(
+    genome: "Genome",
+    X: pd.DataFrame,
+    y: pd.Series,
+    feature_names: List[str],
+    numeric_features: List[str],
+    problem_type: str,
+    profile: Dict[str, Any],
+) -> Tuple[float, Dict]:
+    """Standalone worker function for parallel evaluation to avoid pickling issues."""
+    selected = [f for i, f in enumerate(feature_names) if genome.feature_mask[i] == 1]
+    numeric_selected = [f for f in selected if f in numeric_features]
+    if not numeric_selected:
+        return -1.0, {}
+
+    X_sub = X[numeric_selected]
+
+    try:
+        if genome.model_choice == "RandomForest":
+            model = (
+                RandomForestClassifier(**genome.hparams, random_state=42)
+                if problem_type == "classification"
+                else RandomForestRegressor(**genome.hparams, random_state=42)
+            )
+        elif genome.model_choice == "LogisticRegression":
+            model = LogisticRegression(**genome.hparams)
+        elif genome.model_choice == "SVM":
+            model = SVC(**genome.hparams) if problem_type == "classification" else SVR(**genome.hparams)
+        elif genome.model_choice == "DecisionTree":
+            model = (
+                DecisionTreeClassifier(**genome.hparams, random_state=42)
+                if problem_type == "classification"
+                else DecisionTreeRegressor(**genome.hparams, random_state=42)
+            )
+        elif genome.model_choice == "KNN":
+            model = (
+                KNeighborsClassifier(**genome.hparams)
+                if problem_type == "classification"
+                else KNeighborsRegressor(**genome.hparams)
+            )
+        elif genome.model_choice == "GradientBoosting":
+            model = (
+                GradientBoostingClassifier(**genome.hparams, random_state=42)
+                if problem_type == "classification"
+                else GradientBoostingRegressor(**genome.hparams, random_state=42)
+            )
+        else:
+            model = LinearRegression()
+
+        pipe = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), model)
+
+        # Perform K-Fold CV
+        cv_scores = cross_val_score(
+            pipe, X_sub, y, cv=5, scoring="accuracy" if problem_type == "classification" else "r2"
+        )
+
+        mu_cv = np.mean(cv_scores)
+        sigma_cv = np.std(cv_scores)
+
+        # Generalization Gap
+        pipe.fit(X_sub, y)
+        train_pred = pipe.predict(X_sub)
+        train_metrics = calculate_metrics(y, train_pred, problem_type)
+        mu_train = train_metrics.get("accuracy" if problem_type == "classification" else "r2", 0)
+        generalization_gap = max(0, mu_train - mu_cv)
+
+        # Complexity Penalty C(P)
+        feat_penalty = len(selected) / len(feature_names)
+        model_penalty = 0.0
+        if genome.model_choice in ("RandomForest", "GradientBoosting"):
+            n_est = genome.hparams.get("n_estimators", 100)
+            depth = genome.hparams.get("max_depth", 10) or 20
+            model_penalty = (n_est / 250) * 0.5 + (max(2, depth) / 20) * 0.5
+        elif genome.model_choice == "DecisionTree":
+            depth = genome.hparams.get("max_depth", 10) or 20
+            model_penalty = max(2, depth) / 20
+
+        c_p = (feat_penalty * 0.4) + (model_penalty * 0.6)
+
+        # Adaptive Lambda scaling from ORI
+        ori_score = profile.get("overfitting_risk_index", {}).get("score", 0.5)
+        beta = 1.5
+        l1 = 0.05 * (1 + beta * ori_score)
+        l2 = 0.15 * (1 + beta * ori_score)
+        l3 = 0.10 * (1 + beta * ori_score)
+
+        fitness = mu_cv - (l1 * c_p) - (l2 * sigma_cv) - (l3 * generalization_gap)
+        metrics = {"mu_cv": mu_cv, "sigma_cv": sigma_cv, "gap": generalization_gap, "complexity": c_p}
+        return fitness, metrics
+
+    except Exception:
+        return -1.0, {}
+
+
 class Genome:
     """Encodes a model configuration: model_type, hyperparameters, feature_mask."""
 
@@ -110,9 +204,19 @@ class GeneticModelOptimizer:
         history = []
 
         for gen in range(self.generations):
-            # Parallelize genome evaluation (Spec 2.0 optimization)
+            # Parallelize genome evaluation using standalone worker to avoid pickling 'self' (Spec 2.0 optimization)
             results = Parallel(n_jobs=-1)(
-                delayed(self._evaluate_single)(genome) for genome in self.population if genome.fitness == 0 or gen == 0
+                delayed(_evaluate_genome_worker)(
+                    genome,
+                    self.X,
+                    self.y,
+                    self.feature_names,
+                    self.numeric_features,
+                    self.problem_type,
+                    self.profile,
+                )
+                for genome in self.population
+                if genome.fitness == 0 or gen == 0
             )
             
             # Map results back to population
@@ -167,94 +271,17 @@ class GeneticModelOptimizer:
         best = max(self.population, key=lambda x: x.fitness)
         return history, best
 
-    def _evaluate_single(self, genome: Genome) -> Tuple[float, Dict]:
-        """Worker function for parallel evaluation."""
-        selected = [f for i, f in enumerate(self.feature_names) if genome.feature_mask[i] == 1]
-        numeric_selected = [f for f in selected if f in self.numeric_features]
-        if not numeric_selected:
-            return -1.0, {} # Significant penalty for no features
-
-        X_sub = self.X[numeric_selected]
-        
-        try:
-            # Model selection logic
-            if genome.model_choice == "RandomForest":
-                model = (
-                    RandomForestClassifier(**genome.hparams, random_state=42)
-                    if self.problem_type == "classification"
-                    else RandomForestRegressor(**genome.hparams, random_state=42)
-                )
-            elif genome.model_choice == "LogisticRegression":
-                model = LogisticRegression(**genome.hparams)
-            elif genome.model_choice == "SVM":
-                model = SVC(**genome.hparams) if self.problem_type == "classification" else SVR(**genome.hparams)
-            elif genome.model_choice == "DecisionTree":
-                model = (
-                    DecisionTreeClassifier(**genome.hparams, random_state=42)
-                    if self.problem_type == "classification"
-                    else DecisionTreeRegressor(**genome.hparams, random_state=42)
-                )
-            elif genome.model_choice == "KNN":
-                model = (
-                    KNeighborsClassifier(**genome.hparams)
-                    if self.problem_type == "classification"
-                    else KNeighborsRegressor(**genome.hparams)
-                )
-            elif genome.model_choice == "GradientBoosting":
-                model = (
-                    GradientBoostingClassifier(**genome.hparams, random_state=42)
-                    if self.problem_type == "classification"
-                    else GradientBoostingRegressor(**genome.hparams, random_state=42)
-                )
-            else:
-                model = LinearRegression()
-
-            pipe = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), model)
-            
-            # Perform K-Fold CV
-            cv_scores = cross_val_score(pipe, X_sub, self.y, cv=5, 
-                                      scoring="accuracy" if self.problem_type == "classification" else "r2")
-            
-            mu_cv = np.mean(cv_scores)
-            sigma_cv = np.std(cv_scores)
-            
-            # Generalization Gap
-            pipe.fit(X_sub, self.y)
-            train_pred = pipe.predict(X_sub)
-            train_metrics = calculate_metrics(self.y, train_pred, self.problem_type)
-            mu_train = train_metrics.get("accuracy" if self.problem_type == "classification" else "r2", 0)
-            generalization_gap = max(0, mu_train - mu_cv)
-
-            # Complexity Penalty C(P)
-            feat_penalty = len(selected) / len(self.feature_names)
-            model_penalty = 0.0
-            if genome.model_choice in ("RandomForest", "GradientBoosting"):
-                n_est = genome.hparams.get("n_estimators", 100)
-                depth = genome.hparams.get("max_depth", 10) or 20
-                model_penalty = (n_est / 250) * 0.5 + (max(2, depth) / 20) * 0.5
-            elif genome.model_choice == "DecisionTree":
-                depth = genome.hparams.get("max_depth", 10) or 20
-                model_penalty = (max(2, depth) / 20)
-            
-            c_p = (feat_penalty * 0.4) + (model_penalty * 0.6)
-
-            # Adaptive Lambda scaling from ORI
-            ori_score = self.profile.get("overfitting_risk_index", {}).get("score", 0.5)
-            beta = 1.5
-            l1 = 0.05 * (1 + beta * ori_score)
-            l2 = 0.15 * (1 + beta * ori_score)
-            l3 = 0.10 * (1 + beta * ori_score)
-            
-            fitness = mu_cv - (l1 * c_p) - (l2 * sigma_cv) - (l3 * generalization_gap)
-            metrics = {"mu_cv": mu_cv, "sigma_cv": sigma_cv, "gap": generalization_gap, "complexity": c_p}
-            return fitness, metrics
-            
-        except Exception:
-            return -1.0, {}
-
     def _evaluate(self, genome: Genome):
-        """Deprecated: using _evaluate_single for parallelization."""
-        fitness, metrics = self._evaluate_single(genome)
+        """Sequential evaluation fallback."""
+        fitness, metrics = _evaluate_genome_worker(
+            genome,
+            self.X,
+            self.y,
+            self.feature_names,
+            self.numeric_features,
+            self.problem_type,
+            self.profile,
+        )
         genome.fitness = fitness
         genome.metrics = metrics
 
