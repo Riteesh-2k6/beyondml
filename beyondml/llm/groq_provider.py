@@ -7,7 +7,7 @@ Supports both synchronous chat and async streaming.
 
 import os
 import asyncio
-from typing import List, Dict, AsyncGenerator
+from typing import List, Dict, AsyncGenerator, Optional
 from groq import Groq
 from .base import LLMProvider
 
@@ -35,6 +35,7 @@ class GroqProvider(LLMProvider):
         messages: List[Dict[str, str]],
         json_mode: bool = False,
         temperature: float = 0.3,
+        timeout: Optional[int] = None,
     ) -> str:
         kwargs = {
             "model": self._model,
@@ -45,6 +46,8 @@ class GroqProvider(LLMProvider):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
+        effective_timeout = timeout or self.DEFAULT_TIMEOUT
+        kwargs["timeout"] = effective_timeout
         response = self._client.chat.completions.create(**kwargs)
         return response.choices[0].message.content
 

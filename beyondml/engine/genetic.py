@@ -16,6 +16,7 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
+from joblib import Parallel, delayed
 
 from .metrics import calculate_metrics
 
@@ -109,8 +110,19 @@ class GeneticModelOptimizer:
         history = []
 
         for gen in range(self.generations):
+            # Parallelize genome evaluation (Spec 2.0 optimization)
+            results = Parallel(n_jobs=-1)(
+                delayed(self._evaluate_single)(genome) for genome in self.population if genome.fitness == 0 or gen == 0
+            )
+            
+            # Map results back to population
+            eval_idx = 0
             for genome in self.population:
-                self._evaluate(genome)
+                if genome.fitness == 0 or gen == 0:
+                    fitness, metrics = results[eval_idx]
+                    genome.fitness = fitness
+                    genome.metrics = metrics
+                    eval_idx += 1
 
             self.population.sort(key=lambda x: x.fitness, reverse=True)
             best = self.population[0]
@@ -155,17 +167,15 @@ class GeneticModelOptimizer:
         best = max(self.population, key=lambda x: x.fitness)
         return history, best
 
-    def _evaluate(self, genome: Genome):
+    def _evaluate_single(self, genome: Genome) -> Tuple[float, Dict]:
+        """Worker function for parallel evaluation."""
         selected = [f for i, f in enumerate(self.feature_names) if genome.feature_mask[i] == 1]
         numeric_selected = [f for f in selected if f in self.numeric_features]
         if not numeric_selected:
-            genome.fitness = -1.0 # Significant penalty for no features
-            return
+            return -1.0, {} # Significant penalty for no features
 
         X_sub = self.X[numeric_selected]
         
-        # Implementation of Specification 2.0 & 5.0 (Repeated CV and Variance Penalization)
-        # We use 5-fold CV as per spec 1.1
         try:
             # Model selection logic
             if genome.model_choice == "RandomForest":
@@ -208,22 +218,19 @@ class GeneticModelOptimizer:
             mu_cv = np.mean(cv_scores)
             sigma_cv = np.std(cv_scores)
             
-            # Generalization Gap: mu_train - mu_cv
-            # We fit on the full data provided to GA to get training score
+            # Generalization Gap
             pipe.fit(X_sub, self.y)
             train_pred = pipe.predict(X_sub)
             train_metrics = calculate_metrics(self.y, train_pred, self.problem_type)
             mu_train = train_metrics.get("accuracy" if self.problem_type == "classification" else "r2", 0)
             generalization_gap = max(0, mu_train - mu_cv)
 
-            # Complexity Penalty C(P) - Normalized [0,1]
-            # Spec 3.1 & 3.2
+            # Complexity Penalty C(P)
             feat_penalty = len(selected) / len(self.feature_names)
-            
             model_penalty = 0.0
-            if genome.model_choice == "RandomForest" or genome.model_choice == "GradientBoosting":
+            if genome.model_choice in ("RandomForest", "GradientBoosting"):
                 n_est = genome.hparams.get("n_estimators", 100)
-                depth = genome.hparams.get("max_depth", 10) or 20 # None -> high
+                depth = genome.hparams.get("max_depth", 10) or 20
                 model_penalty = (n_est / 250) * 0.5 + (max(2, depth) / 20) * 0.5
             elif genome.model_choice == "DecisionTree":
                 depth = genome.hparams.get("max_depth", 10) or 20
@@ -233,18 +240,23 @@ class GeneticModelOptimizer:
 
             # Adaptive Lambda scaling from ORI
             ori_score = self.profile.get("overfitting_risk_index", {}).get("score", 0.5)
-            # lambda_j = lambda_base * (1 + beta * ORI)
             beta = 1.5
-            l1 = 0.05 * (1 + beta * ori_score) # Complexity
-            l2 = 0.15 * (1 + beta * ori_score) # Variance
-            l3 = 0.10 * (1 + beta * ori_score) # Gap
+            l1 = 0.05 * (1 + beta * ori_score)
+            l2 = 0.15 * (1 + beta * ori_score)
+            l3 = 0.10 * (1 + beta * ori_score)
             
-            # Final Fitness: F(P) = mu_cv - l1*CP - l2*sigma - l3*Gap
-            genome.fitness = mu_cv - (l1 * c_p) - (l2 * sigma_cv) - (l3 * generalization_gap)
-            genome.metrics = {"mu_cv": mu_cv, "sigma_cv": sigma_cv, "gap": generalization_gap, "complexity": c_p}
+            fitness = mu_cv - (l1 * c_p) - (l2 * sigma_cv) - (l3 * generalization_gap)
+            metrics = {"mu_cv": mu_cv, "sigma_cv": sigma_cv, "gap": generalization_gap, "complexity": c_p}
+            return fitness, metrics
             
-        except Exception as e:
-            genome.fitness = -1.0
+        except Exception:
+            return -1.0, {}
+
+    def _evaluate(self, genome: Genome):
+        """Deprecated: using _evaluate_single for parallelization."""
+        fitness, metrics = self._evaluate_single(genome)
+        genome.fitness = fitness
+        genome.metrics = metrics
 
     def _tournament_select(self) -> Genome:
         # Spec 7.1: T must satisfy 2 <= T <= population/5

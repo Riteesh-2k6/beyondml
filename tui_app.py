@@ -39,7 +39,6 @@ from textual.message import Message
 from textual import work
 from rich.text import Text
 
-from beyondml.llm.groq_provider import GroqProvider
 from beyondml.engine.profiler import DatasetProfiler, TargetIdentifier
 from beyondml.agents.orchestrator import OrchestratorAgent
 from beyondml.agents.eda_agent import EDAAgent
@@ -47,19 +46,24 @@ from beyondml.agents.outlier_agent import OutlierAgent
 from beyondml.agents.feature_agent import FeatureAgent
 from beyondml.agents.ga_trainer import GATrainerAgent
 from beyondml.agents.evaluator_agent import EvaluatorAgent
+from beyondml.agents.reflection_agent import ReflectionAgent
+from beyondml.llm import get_llm_provider
+from beyondml.engine.tracing import AgentTrace
 
 
 # ═══════════════════════════════════════════════════
 #  ASCII Art Banner
 # ═══════════════════════════════════════════════════
 
-BANNER = r"""[bold bright_red] ██████  ███████ ██   ██  ██████  ██   ██ ██████    ███    ███ ██
- ██   ██ ██       ██ ██  ██    ██ ████  ██ ██   ██   ████  ████ ██
- ██████  █████     ███   ██    ██ ██ ██ ██ ██   ██   ██ ████ ██ ██
- ██   ██ ██        ██    ██    ██ ██  ████ ██   ██   ██  ██  ██ ██
- ██████  ███████   ██     ██████  ██   ███ ██████    ██      ██ ██████[/bold bright_red]"""
+BANNER = """[bold orange3]
+  ██████╗ ███████╗██╗   ██╗ ██████╗ ███╗   ██╗██████╗ ███╗   ███╗██╗     
+  ██╔══██╗██╔════╝╚██╗ ██╔╝██╔═══██╗████╗  ██║██╔══██╗████╗ ████║██║     
+  ██████╔╝█████╗   ╚████╔╝ ██║   ██║██╔██╗ ██║██║  ██║██╔████╔██║██║     
+  ██╔══██╗██╔══╝    ╚██╔╝  ██║   ██║██║╚██╗██║██║  ██║██║╚██╔╝██║██║     
+  ██████╔╝███████╗   ██║   ╚██████╔╝██║ ╚████║██████╔╝██║ ╚═╝ ██║███████╗
+  ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚═╝     ╚═╝╚══════╝[/bold orange3]"""
 
-SUBTITLE = "[dim]Terminal-native AutoML · Groq LLM · Genetic Algorithm · Ctrl+C to quit[/dim]"
+SUBTITLE = "[dim]Terminal-native AutoML · Ollama / Groq · Genetic Algorithm · Ctrl+C to quit[/dim]"
 
 
 # ═══════════════════════════════════════════════════
@@ -164,6 +168,17 @@ class WelcomeScreen(Screen):
             yield RadioButton("Explore  (EDA only)")
             yield RadioButton("Supervised ML  (classification / regression)")
             yield RadioButton("Unsupervised ML  (clustering)")
+        yield Label("[bold]> LLM Provider[/bold]", classes="field-label")
+        with RadioSet(id="llm-select"):
+            yield RadioButton("Ollama  (Local, private)", value=True)
+            yield RadioButton("Groq  (Cloud, fast)")
+        with Horizontal():
+            with Vertical():
+                yield Label("[bold]> Pop Size[/bold]  [dim](GA)[/dim]", classes="field-label")
+                yield Input(value="10", id="ga-pop", placeholder="10")
+            with Vertical():
+                yield Label("[bold]> Generations[/bold]  [dim](GA)[/dim]", classes="field-label")
+                yield Input(value="5", id="ga-gen", placeholder="5")
         # Bottom bar — always visible
         with Vertical(id="bottom-bar"):
             yield Static("[dim]Path: Explore (EDA only)[/dim]", id="path-info")
@@ -206,6 +221,13 @@ class WelcomeScreen(Screen):
         path_map = {0: "autonomous", 1: "explore", 2: "supervised", 3: "unsupervised"}
         path_choice = path_map.get(idx, "autonomous")
 
+        llm_radio = self.query_one("#llm-select", RadioSet)
+        llm_idx = llm_radio.pressed_index
+        llm_choice = "ollama" if llm_idx == 0 else "groq"
+
+        ga_pop = int(self.query_one("#ga-pop", Input).value.strip() or "10")
+        ga_gen = int(self.query_one("#ga-gen", Input).value.strip() or "5")
+
         # Resolve CSV path
         full_path = csv_path
         if not os.path.isabs(csv_path):
@@ -239,7 +261,7 @@ class WelcomeScreen(Screen):
         await asyncio.sleep(0.5)
 
         self.app.push_screen(
-            PipelineScreen(df, full_path, description, path_choice)
+            PipelineScreen(df, full_path, description, path_choice, llm_choice, ga_pop, ga_gen)
         )
 
     def _reset_button(self):
@@ -272,12 +294,35 @@ class PipelineScreen(Screen):
         row-span: 1;
         border: solid $accent;
         height: 100%;
-        overflow-y: auto;
+    }
+    #pipeline-tree {
+        height: auto;
+        max-height: 40%;
+        scrollbar-size: 0 0;
+    }
+    #reasoning-log {
+        height: 1fr;
+        border-top: tall $accent;
+        scrollbar-size: 0 0;
+        background: $boost;
     }
     #center-panel {
         row-span: 1;
         border: solid $warning;
         height: 100%;
+        scrollbar-size: 0 0;
+    }
+    #right-panel {
+        row-span: 1;
+        border: solid $accent;
+        height: 100%;
+        scrollbar-size: 0 0;
+    }
+    RichLog {
+        scrollbar-size: 0 0;
+    }
+    Tree {
+        scrollbar-size: 0 0;
     }
     #input-bar {
         column-span: 3;
@@ -315,28 +360,32 @@ class PipelineScreen(Screen):
         Binding("tab", "focus_next", "Focus", show=True),
     ]
 
-    def __init__(self, df: pd.DataFrame, path: str, description: str, path_choice: str):
+    def __init__(self, df: pd.DataFrame, path: str, description: str, path_choice: str, llm_choice: str = "ollama", ga_pop: int = 10, ga_gen: int = 5):
         super().__init__()
         self.df = df
         self.dataset_path = path
         self.description = description
         self.path_choice = path_choice
+        self.llm_choice = llm_choice
+        self.ga_pop = ga_pop
+        self.ga_gen = ga_gen
         self.input_queue = asyncio.Queue()
         self._fitness_data = []
 
     def compose(self) -> ComposeResult:
-        # Left: Pipeline Tree
+        # Left: Pipeline Tree + Reasoning
         with Vertical(id="left-panel"):
             yield Static("▸ Pipeline · Tree", classes="panel-title")
             tree = Tree("Pipeline", id="pipeline-tree")
             tree.root.expand()
             yield tree
+            yield Static("▸ Agent Reasoning", classes="panel-title")
+            yield RichLog(id="reasoning-log", markup=True, wrap=True, max_lines=1000)
 
         # Center: Log + Charts
         with Vertical(id="center-panel"):
             yield Static("▸ Agent Log · RichLog + Charts", classes="panel-title")
-            # wrap=False is required to prevent plotext charts from destroying layout
-            yield RichLog(id="main-log", markup=True, wrap=False, max_lines=5000)
+            yield RichLog(id="main-log", markup=True, wrap=True, max_lines=5000)
 
         # Right: Stats
         with VerticalScroll(id="right-panel"):
@@ -390,6 +439,15 @@ class PipelineScreen(Screen):
         except Exception:
             pass
 
+    async def _update_reasoning(self, agent_name: str, text: str):
+        """Update the reasoning log in the left panel."""
+        try:
+            log = self.query_one("#reasoning-log", RichLog)
+            log.write(f"\n[bold cyan]● {agent_name}[/bold cyan]")
+            log.write(f"[dim]{text}[/dim]")
+        except Exception:
+            pass
+
     async def _get_user_input(self, prompt: str = "Your response...") -> str:
         """Show input bar with prompt, wait for user response, then hide."""
         inp = self.query_one("#user-input", Input)
@@ -433,21 +491,31 @@ class PipelineScreen(Screen):
     async def run_pipeline(self):
         """Main pipeline execution — runs all agents sequentially."""
         tree = self.query_one("#pipeline-tree", Tree)
+        trace = AgentTrace()
 
         try:
-            # Initialize LLM
-            await self._log("[dim]Initializing Groq LLM provider...[/dim]")
+            # Initialize LLM based on user selection
+            await self._log(f"[dim]Initializing LLM provider ({self.llm_choice})...[/dim]")
             try:
-                llm = GroqProvider()
-                await self._log(f"[green]✓ Connected to Groq ({llm.model_name})[/green]\n")
+                if self.llm_choice == "groq":
+                    from beyondml.llm.groq_provider import GroqProvider
+                    llm = GroqProvider()
+                else:
+                    from beyondml.llm.ollama_provider import OllamaProvider
+                    llm = OllamaProvider()
+                await self._log(f"[green]\u2713 Connected to {llm.model_name}[/green]\n")
             except Exception as e:
-                await self._log(f"[bold red]✗ Groq init failed: {e}[/bold red]")
-                await self._log("[yellow]Set GROQ_API_KEY in .env file[/yellow]")
+                await self._log(f"[bold red]\u2717 LLM init failed: {e}[/bold red]")
+                if self.llm_choice == "groq":
+                    await self._log("[yellow]Set GROQ_API_KEY in .env file[/yellow]")
+                else:
+                    await self._log("[yellow]Make sure Ollama is running: ollama serve[/yellow]")
                 return
 
             # ── STEP 1: Orchestrator ──
             await self._log("[dim]─── Orchestrator ─────────────────────────────────[/dim]")
             self._update_tree_node(tree, "Orchestrator", "running")
+            trace.start("Orchestrator", f"path_choice={self.path_choice}")
 
             identifier = TargetIdentifier(self.df)
             target_info = identifier.identify()
@@ -470,11 +538,14 @@ class PipelineScreen(Screen):
             model_recs = orch_result.get("model_recommendations", ["RandomForest"])
 
             self._update_tree_node(tree, "Orchestrator", "done", [f"Path: {path}"])
+            trace.finish(f"path={path}, target={target}")
+            await self._update_reasoning("Orchestrator", orch_result.get("reasoning", "Autonomous routing decided."))
             await self._log("")
 
             # ── STEP 2: EDA Agent ──
             await self._log("[dim]─── EDA Agent ───────────────────────────────────[/dim]")
             self._update_tree_node(tree, "EDA Agent", "running")
+            trace.start("EDA Agent", f"shape={self.df.shape}")
 
             profiler = DatasetProfiler(self.df, target_column=target)
             profile = profiler.run()
@@ -487,7 +558,7 @@ class PipelineScreen(Screen):
                 await self._log(f"\n[bold magenta]── {chart_name} ──[/bold magenta]")
                 try:
                     # Safely parse raw ANSI from plotext
-                    ansi_chart = Text.from_ansi(chart_str)
+                    ansi_chart = Text.from_ansi(chart_str, no_wrap=True)
                     await self._log(ansi_chart)
                 except Exception:
                     await self._log("  [dim]⚠ Could not render chart output[/dim]")
@@ -507,6 +578,8 @@ class PipelineScreen(Screen):
 
             self._update_tree_node(tree, "EDA Agent", "done",
                 [f"Target: {confirmed_target}", f"{len(eda_result.get('eda_insights', []))} insights"])
+            trace.finish(f"target={confirmed_target}, insights={len(eda_result.get('eda_insights', []))}")
+            await self._update_reasoning("EDA Agent", eda_result.get("narrative", "Data profiling and chart generation complete."))
             await self._log("")
 
             # For explore-only path, stop here
@@ -523,6 +596,7 @@ class PipelineScreen(Screen):
             # ── STEP 3: Outlier Handler ──
             await self._log("[dim]─── Outlier Handler ─────────────────────────────[/dim]")
             self._update_tree_node(tree, "Outlier Handler", "running")
+            trace.start("Outlier Handler")
 
             outlier_agent = OutlierAgent(llm)
             outlier_result = await outlier_agent.run(
@@ -532,6 +606,8 @@ class PipelineScreen(Screen):
 
             self._update_tree_node(tree, "Outlier Handler", "done",
                 [f"Strategy: {outlier_result['outlier_strategy']}"])
+            trace.finish(f"strategy={outlier_result['outlier_strategy']}")
+            await self._update_reasoning("Outlier Handler", f"Applied {outlier_result['outlier_strategy']} strategy based on distribution analysis.")
             await self._log("")
 
             # --- START ITERATIVE LOOP ---
@@ -545,8 +621,8 @@ class PipelineScreen(Screen):
             
             # Identify model choice once
             model_choice = model_recs[0] if model_recs else "RandomForest"
-            current_pop_size = 10
-            current_generations = 5
+            current_pop_size = self.ga_pop
+            current_generations = self.ga_gen
             
             while current_iter <= max_iterations:
                 if current_iter > 1:
@@ -574,6 +650,11 @@ class PipelineScreen(Screen):
 
                 self._update_tree_node(tree, "Feature Engineer", "done",
                     [f"+{n_applied} features"])
+                
+                # Combine rationales for reasoning log
+                applied_list = feat_result.get("features_applied", [])
+                feat_reasoning = "\n".join([f"• {f['name']}: {f['rationale']}" for f in feat_result.get("feature_proposals", []) if f['name'] in applied_list])
+                await self._update_reasoning("Feature Engineer", feat_reasoning or "No new features derived.")
                 await self._log("")
 
                 # Update data preview
@@ -655,6 +736,7 @@ class PipelineScreen(Screen):
 
                 self._update_tree_node(tree, "Evaluator", "done",
                     [f"Score: {eval_result['test_score']:.4f}"])
+                await self._update_reasoning("Evaluator", eval_result.get("eval_narration", "Final model performance validated."))
                 
                 # ── STEP 7: Reflection ──
                 from beyondml.agents.reflection_agent import ReflectionAgent
@@ -665,13 +747,14 @@ class PipelineScreen(Screen):
                 reflection_result = await reflection_agent.run(eval_result, current_iter, max_iterations, self._log)
                 
                 self._update_tree_node(tree, f"Reflection", "done", [reflection_result["status"]])
+                await self._update_reasoning("Reflection", reflection_result.get("reasoning", "Pipeline iteration completed."))
                 
                 # Track best
                 if eval_result['test_score'] > best_model_score:
                     best_model_score = eval_result['test_score']
                     best_eval_result = eval_result
                     
-                if reflection_result["status"] == "satisfied":
+                if reflection_result["status"] in ("satisfied", "error"):
                     break
                     
                 mods = reflection_result.get("modifications") or {}
@@ -703,6 +786,10 @@ class PipelineScreen(Screen):
                         current_pop_size = mods["next_ga_pop_size"]
                 
                 current_iter += 1
+
+            # Log trace summary
+            await self._log("\n[dim]─── Pipeline Trace ──────────────────────────────[/dim]")
+            await self._log(f"[dim]{trace.print_summary()}[/dim]")
 
             # Show completion modal
             await asyncio.sleep(0.5)

@@ -13,6 +13,8 @@ from typing import List, Dict, AsyncGenerator, Optional
 class LLMProvider(ABC):
     """Base class for all LLM providers (Groq, Ollama, local, etc.)."""
 
+    DEFAULT_TIMEOUT = 60  # seconds
+
     @property
     @abstractmethod
     def model_name(self) -> str:
@@ -25,6 +27,7 @@ class LLMProvider(ABC):
         messages: List[Dict[str, str]],
         json_mode: bool = False,
         temperature: float = 0.3,
+        timeout: Optional[int] = None,
     ) -> str:
         """
         Synchronous chat completion.
@@ -33,6 +36,7 @@ class LLMProvider(ABC):
             messages: List of {"role": ..., "content": ...} dicts.
             json_mode: If True, force JSON output format.
             temperature: Sampling temperature.
+            timeout: Max seconds to wait. Defaults to DEFAULT_TIMEOUT.
 
         Returns:
             The assistant's reply as a string.

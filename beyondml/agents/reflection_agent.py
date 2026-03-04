@@ -142,4 +142,15 @@ class ReflectionAgent:
             }
         except Exception as e:
             await log(f"  [dim]⚠ Reflection error: {e}[/dim]")
-            return {"status": "satisfied", "modifications": None}
+            # Don't falsely claim satisfied — signal the error so the loop
+            # can decide whether to retry or stop.
+            return {
+                "status": "error",
+                "modifications": {
+                    "features_to_drop": [],
+                    "new_features": [],
+                    "next_model": None,
+                    "next_ga_generations": 5,
+                    "next_ga_pop_size": 10,
+                },
+            }

@@ -13,3 +13,12 @@ dist/
 .ipynb_checkpoints/
 data/models/*.pkl
 data/reports/*.json
+
+# Testing & Coverage
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# PMLB cache
+data/pmlb_cache/
