@@ -8,16 +8,24 @@ BeyondML is an autonomous machine learning pipeline that uses multiple specializ
 
 ## ⚡ Quick Start
 
+The fastest way to install BeyondML globally (like a standalone CLI app) is using `pipx` or `pip`:
+
 ```bash
-# Clone
+# Recommended 1-Click Install (isolated environment):
+pipx install git+https://github.com/Riteesh-2k6/beyondml.git
+
+# Alternative (standard pip):
+pip install git+https://github.com/Riteesh-2k6/beyondml.git
+
+# Launch the TUI immediately
+beyondml run
+```
+
+If you want to contribute or modify the code locally instead:
+```bash
 git clone https://github.com/Riteesh-2k6/beyondml.git
 cd beyondml
-
-# Install (editable mode with dev tools)
 pip install -e ".[dev]"
-
-# Launch the TUI
-beyondml run
 ```
 
 ---
