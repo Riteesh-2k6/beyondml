@@ -14,11 +14,53 @@ import asyncio
 # Add project root to path so beyondml package is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Load .env
+def save_env_config(config: dict):
+    """Save configuration to .env file."""
+    env_path = Path(__file__).parent / ".env"
+    lines = []
+    if env_path.exists():
+        existing_lines = env_path.read_text().splitlines()
+        keys_handled = set()
+        for line in existing_lines:
+            if "=" in line and not line.strip().startswith("#"):
+                key = line.split("=", 1)[0].strip()
+                if key in config:
+                    lines.append(f"{key}={config[key]}")
+                    keys_handled.add(key)
+                else:
+                    lines.append(line)
+            else:
+                lines.append(line)
+        
+        # Add any new keys
+        for key, val in config.items():
+            if key not in keys_handled:
+                lines.append(f"{key}={val}")
+    else:
+        for key, val in config.items():
+            lines.append(f"{key}={val}")
+            
+    env_path.write_text("\n".join(lines) + "\n")
+    # Update current environment
+    for key, val in config.items():
+        os.environ[key] = str(val)
+
+
+def check_config() -> bool:
+    """Check if basic LLM configuration exists."""
+    provider = os.getenv("LLM_PROVIDER")
+    if not provider:
+        return False
+    if provider == "groq" and not os.getenv("GROQ_API_KEY"):
+        return False
+    return True
+
+
+# Load .env on startup
 from pathlib import Path
-env_path = Path(__file__).parent / ".env"
-if env_path.exists():
-    for line in env_path.read_text().splitlines():
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, val = line.split("=", 1)
@@ -40,13 +82,11 @@ from textual import work
 from rich.text import Text
 
 from beyondml.engine.profiler import DatasetProfiler, TargetIdentifier
-from beyondml.agents.orchestrator import OrchestratorAgent
-from beyondml.agents.eda_agent import EDAAgent
-from beyondml.agents.outlier_agent import OutlierAgent
-from beyondml.agents.feature_agent import FeatureAgent
-from beyondml.agents.ga_trainer import GATrainerAgent
-from beyondml.agents.evaluator_agent import EvaluatorAgent
-from beyondml.agents.reflection_agent import ReflectionAgent
+from beyondml.agents import (
+    OrchestratorAgent, EDAAgent, OutlierAgent, FeatureAgent, 
+    GATrainerAgent, EvaluatorAgent, ReflectionAgent, SanityAgent, 
+    LeakageAgent, ImputationAgent, DeepLearningAgent
+)
 from beyondml.llm import get_llm_provider
 from beyondml.engine.tracing import AgentTrace
 
@@ -56,12 +96,12 @@ from beyondml.engine.tracing import AgentTrace
 # ═══════════════════════════════════════════════════
 
 BANNER = """[bold orange3]
-  ██████╗ ███████╗██╗   ██╗ ██████╗ ███╗   ██╗██████╗ ███╗   ███╗██╗     
-  ██╔══██╗██╔════╝╚██╗ ██╔╝██╔═══██╗████╗  ██║██╔══██╗████╗ ████║██║     
-  ██████╔╝█████╗   ╚████╔╝ ██║   ██║██╔██╗ ██║██║  ██║██╔████╔██║██║     
-  ██╔══██╗██╔══╝    ╚██╔╝  ██║   ██║██║╚██╗██║██║  ██║██║╚██╔╝██║██║     
-  ██████╔╝███████╗   ██║   ╚██████╔╝██║ ╚████║██████╔╝██║ ╚═╝ ██║███████╗
-  ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚═╝     ╚═╝╚══════╝[/bold orange3]"""
+  ██████╗ ███████╗██╗   ██╗ ██████╗ ███╗   ██╗██████╗    ███╗   ███╗██╗     
+  ██╔══██╗██╔════╝╚██╗ ██╔╝██╔═══██╗████╗  ██║██╔══██╗   ████╗ ████║██║     
+  ██████╔╝█████╗   ╚████╔╝ ██║   ██║██╔██╗ ██║██║  ██║   ██╔████╔██║██║     
+  ██╔══██╗██╔══╝    ╚██╔╝  ██║   ██║██║╚██╗██║██║  ██║   ██║╚██╔╝██║██║     
+  ██████╔╝███████╗   ██║   ╚██████╔╝██║ ╚████║██████╔╝   ██║ ╚══ ██║███████╗
+  ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═══╝╚═════╝    ╚═╝     ╚═╝╚══════╝[/bold orange3]"""
 
 SUBTITLE = "[dim]Terminal-native AutoML · Ollama / Groq · Genetic Algorithm · Ctrl+C to quit[/dim]"
 
@@ -69,6 +109,84 @@ SUBTITLE = "[dim]Terminal-native AutoML · Ollama / Groq · Genetic Algorithm ·
 # ═══════════════════════════════════════════════════
 #  Completion Modal
 # ═══════════════════════════════════════════════════
+
+class ConfigScreen(ModalScreen):
+    """Setup screen for LLM provider details."""
+
+    CSS = """
+    ConfigScreen {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.7);
+    }
+    ConfigScreen > Vertical {
+        width: 60;
+        height: auto;
+        border: heavy $accent;
+        background: $surface;
+        padding: 2;
+    }
+    ConfigScreen .title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    ConfigScreen .label {
+        margin-top: 1;
+        color: $text-muted;
+    }
+    ConfigScreen .save-btn {
+        margin-top: 2;
+        width: 100%;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static("🤖 LLM SETUP WIZARD", classes="title")
+            yield Static("Configure your LLM provider to get started.", classes="label")
+            yield Rule()
+            
+            yield Label("LLM Provider")
+            with RadioSet(id="setup-llm-select"):
+                yield RadioButton("Ollama (Local)", value=os.getenv("LLM_PROVIDER") == "ollama" or not os.getenv("LLM_PROVIDER"))
+                yield RadioButton("Groq (Cloud)", value=os.getenv("LLM_PROVIDER") == "groq")
+            
+            yield Label("Groq API Key (required for Groq)")
+            yield Input(value=os.getenv("GROQ_API_KEY", ""), id="setup-groq-key", password=True, placeholder="gsk_...")
+            
+            yield Label("Groq Model")
+            yield Input(value=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), id="setup-groq-model")
+            
+            yield Label("Ollama Model")
+            yield Input(value=os.getenv("OLLAMA_MODEL", "qwen3:8b"), id="setup-ollama-model")
+            
+            yield Button("Save & Continue", variant="success", classes="save-btn", id="save-config-btn")
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "save-config-btn":
+            llm_radio = self.query_one("#setup-llm-select", RadioSet)
+            provider = "ollama" if llm_radio.pressed_index == 0 else "groq"
+            
+            groq_key = self.query_one("#setup-groq-key", Input).value.strip()
+            groq_model = self.query_one("#setup-groq-model", Input).value.strip()
+            ollama_model = self.query_one("#setup-ollama-model", Input).value.strip()
+            
+            if provider == "groq" and not groq_key:
+                self.notify("Groq API Key is required for Groq provider!", severity="error")
+                return
+                
+            config = {
+                "LLM_PROVIDER": provider,
+                "GROQ_API_KEY": groq_key,
+                "GROQ_MODEL": groq_model,
+                "OLLAMA_MODEL": ollama_model
+            }
+            
+            save_env_config(config)
+            self.app.notify("Configuration saved to .env", severity="success")
+            self.dismiss(True)
+
 
 class CompletionModal(ModalScreen):
     """Shows final pipeline results."""
@@ -152,6 +270,7 @@ class WelcomeScreen(Screen):
     #loading-status { text-align: center; display: none; color: $warning; }
     #loading-status.visible { display: block; }
     #path-info { text-align: center; color: $text-muted; }
+    #ga-config { height: auto; min-height: 4; }
     """
 
     def compose(self) -> ComposeResult:
@@ -162,17 +281,21 @@ class WelcomeScreen(Screen):
         yield Input(value="data/echallan_daily_data.csv", id="csv-path", placeholder="data/sample.csv")
         yield Label("[bold]> Dataset description[/bold]  [dim](optional)[/dim]", classes="field-label")
         yield Input(id="description", placeholder="e.g. Iris flower measurements for species classification")
+        yield Label("[bold]> Inference CSV (for Drift Analysis)[/bold]  [dim](optional)[/dim]", classes="field-label")
+        yield Input(id="inference-path", placeholder="data/inference_sample.csv")
         yield Label("[bold]> Analysis path[/bold]", classes="field-label")
         with RadioSet(id="path-select"):
             yield RadioButton("Autonomous  (Let AI decide)", value=True)
             yield RadioButton("Explore  (EDA only)")
             yield RadioButton("Supervised ML  (classification / regression)")
             yield RadioButton("Unsupervised ML  (clustering)")
+            yield RadioButton("Dimensionality Reduction  (PCA / feature extraction)")
+            yield RadioButton("Deep Learning  (Neural Networks)")
         yield Label("[bold]> LLM Provider[/bold]", classes="field-label")
         with RadioSet(id="llm-select"):
             yield RadioButton("Ollama  (Local, private)", value=True)
             yield RadioButton("Groq  (Cloud, fast)")
-        with Horizontal():
+        with Horizontal(id="ga-config", classes="config-row"):
             with Vertical():
                 yield Label("[bold]> Pop Size[/bold]  [dim](GA)[/dim]", classes="field-label")
                 yield Input(value="10", id="ga-pop", placeholder="10")
@@ -192,7 +315,9 @@ class WelcomeScreen(Screen):
             0: "Autonomous (Let AI decide)", 
             1: "Explore Dataset (EDA only)", 
             2: "Supervised ML (classification / regression)", 
-            3: "Unsupervised ML (clustering)"
+            3: "Unsupervised ML (clustering)",
+            4: "Dimensionality Reduction (PCA)",
+            5: "Deep Learning (Neural Networks)"
         }
         idx = event.radio_set.pressed_index
         name = labels.get(idx, "Autonomous")
@@ -218,7 +343,7 @@ class WelcomeScreen(Screen):
         description = self.query_one("#description", Input).value.strip()
         radio = self.query_one("#path-select", RadioSet)
         idx = radio.pressed_index
-        path_map = {0: "autonomous", 1: "explore", 2: "supervised", 3: "unsupervised"}
+        path_map = {0: "autonomous", 1: "explore", 2: "supervised", 3: "unsupervised", 4: "dimensionality_reduction", 5: "deep_learning"}
         path_choice = path_map.get(idx, "autonomous")
 
         llm_radio = self.query_one("#llm-select", RadioSet)
@@ -237,6 +362,8 @@ class WelcomeScreen(Screen):
             self.notify(f"File not found: {full_path}", severity="error")
             self._reset_button()
             return
+
+        inference_csv_path = self.query_one("#inference-path", Input).value.strip()
 
         status.update("[bold yellow]⏳ Reading CSV file...[/bold yellow]")
         await asyncio.sleep(0.1)
@@ -261,7 +388,7 @@ class WelcomeScreen(Screen):
         await asyncio.sleep(0.5)
 
         self.app.push_screen(
-            PipelineScreen(df, full_path, description, path_choice, llm_choice, ga_pop, ga_gen)
+            PipelineScreen(df, full_path, description, path_choice, llm_choice, ga_pop, ga_gen, inference_csv_path, target_col="")
         )
 
     def _reset_button(self):
@@ -357,12 +484,15 @@ class PipelineScreen(Screen):
         Binding("escape", "quit", "Quit"),
         Binding("ctrl+s", "save", "Save", show=True),
         Binding("ctrl+e", "export", "Export", show=True),
+        Binding("v", "view_charts", "View Charts", show=True),
         Binding("tab", "focus_next", "Focus", show=True),
     ]
 
-    def __init__(self, df: pd.DataFrame, path: str, description: str, path_choice: str, llm_choice: str = "ollama", ga_pop: int = 10, ga_gen: int = 5):
+    def __init__(self, df: pd.DataFrame, path: str, description: str, path_choice: str, llm_choice: str = "ollama", ga_pop: int = 10, ga_gen: int = 5, inference_path: str = "", target_col: str = ""):
         super().__init__()
         self.df = df
+        self.inference_path = inference_path
+        self.user_target = target_col
         self.dataset_path = path
         self.description = description
         self.path_choice = path_choice
@@ -371,6 +501,7 @@ class PipelineScreen(Screen):
         self.ga_gen = ga_gen
         self.input_queue = asyncio.Queue()
         self._fitness_data = []
+        self.interactive_charts = []
 
     def compose(self) -> ComposeResult:
         # Left: Pipeline Tree + Reasoning
@@ -378,6 +509,19 @@ class PipelineScreen(Screen):
             yield Static("▸ Pipeline · Tree", classes="panel-title")
             tree = Tree("Pipeline", id="pipeline-tree")
             tree.root.expand()
+            tree.root.add("Orchestrator")
+            tree.root.add("Domain Sanity (Parallel)")
+            tree.root.add("Data Drift Analysis")
+            tree.root.add("Imputation")
+            tree.root.add("EDA Agent (Parallel)")
+            tree.root.add("Outlier Handler (Parallel)")
+            tree.root.add("Feature Engineer")
+            tree.root.add("GA Trainer (Supervised)")
+            tree.root.add("Ensemble")
+            tree.root.add("DL Trainer (Neural Net)")
+            tree.root.add("Evaluator")
+            tree.root.add("Explainability")
+            tree.root.add("Reflection")
             yield tree
             yield Static("▸ Agent Reasoning", classes="panel-title")
             yield RichLog(id="reasoning-log", markup=True, wrap=True, max_lines=1000)
@@ -406,7 +550,7 @@ class PipelineScreen(Screen):
 
         # Bottom: Input bar — always visible
         with Vertical(id="input-bar"):
-            yield Static("[dim]ctrl+c quit · ctrl+s save · ctrl+e export · tab focus[/dim]", id="keybinds-label")
+            yield Static("[dim]ctrl+c quit · ctrl+s save · ctrl+e export · v view charts · tab focus[/dim]", id="keybinds-label")
             yield Static("", id="input-prompt")
             yield Input(id="user-input", placeholder="Waiting for agent prompt...")
 
@@ -432,10 +576,12 @@ class PipelineScreen(Screen):
             pass
 
     async def _log(self, msg: str):
-        """Write to the center log panel."""
+        """Write to the center log panel with timestamp."""
         try:
+            from datetime import datetime
+            now = datetime.now().strftime("%H:%M:%S")
             log = self.query_one("#main-log", RichLog)
-            log.write(msg)
+            log.write(f"[dim]{now}[/dim] {msg}")
         except Exception:
             pass
 
@@ -503,9 +649,20 @@ class PipelineScreen(Screen):
                 else:
                     from beyondml.llm.ollama_provider import OllamaProvider
                     llm = OllamaProvider()
-                await self._log(f"[green]\u2713 Connected to {llm.model_name}[/green]\n")
+                
+                # Verify connection
+                await self._log(f"[dim]Testing connection to {llm.model_name}...[/dim]")
+                if await asyncio.to_thread(llm.test_connection):
+                    await self._log(f"[green]✓ Connected to {llm.model_name}[/green]\n")
+                else:
+                    await self._log(f"[bold red]✗ Connection failed to {llm.model_name}[/bold red]")
+                    if "ollama" in self.llm_choice:
+                        await self._log("[yellow]Tip: Ensure Ollama is running and you have run 'ollama pull " + (os.getenv("OLLAMA_MODEL", "qwen3:8b")) + "'[/yellow]\n")
+                    else:
+                        await self._log("[yellow]Tip: Check your GROQ_API_KEY in .env[/yellow]\n")
+                    # We don't necessarily stop here, but the user is warned.
             except Exception as e:
-                await self._log(f"[bold red]\u2717 LLM init failed: {e}[/bold red]")
+                await self._log(f"[bold red]✗ LLM init failed: {e}[/bold red]")
                 if self.llm_choice == "groq":
                     await self._log("[yellow]Set GROQ_API_KEY in .env file[/yellow]")
                 else:
@@ -517,24 +674,51 @@ class PipelineScreen(Screen):
             self._update_tree_node(tree, "Orchestrator", "running")
             trace.start("Orchestrator", f"path_choice={self.path_choice}")
 
-            identifier = TargetIdentifier(self.df)
-            target_info = identifier.identify()
+            # Sample values for LLM
+            df_sample_str = ""
+            for col in self.df.columns[:20]: # cap at 20 columns max to not overflow context
+                uniques = self.df[col].dropna().unique()
+                if len(uniques) > 0:
+                    sample = [str(x) for x in uniques[:3]]
+                    df_sample_str += f" - {col}: {sample}\n"
 
             df_summary = (
                 f"Shape: {self.df.shape}\n"
                 f"Columns: {list(self.df.columns)}\n"
                 f"Dtypes: {self.df.dtypes.to_dict()}\n"
-                f"First 3 rows:\n{self.df.head(3).to_string()}\n"
+                f"Sample Values:\n{df_sample_str}\n"
                 f"Describe:\n{self.df.describe().to_string()[:1000]}"
             )
 
             orch = OrchestratorAgent(llm)
             orch_result = await orch.run(
-                df_summary, self.description, target_info, self.path_choice, self._log
+                df_summary, self.description, self.user_target, self.path_choice, self._log
             )
 
             path = orch_result.get("path", "supervised")
-            target = orch_result.get("suggested_target", target_info.get("suggested_target"))
+            target = orch_result.get("suggested_target")
+            
+            if path in ["supervised", "deep_learning"]:
+                # Interactive prompt to confirm or change target
+                cols_str = ", ".join(list(self.df.columns))
+                user_override = await self._get_user_input(
+                    f"Columns: {cols_str}\nAI suggests target '{target}'. Press Enter to accept, or type a different column name:"
+                )
+                if user_override and user_override.strip() in self.df.columns:
+                    target = user_override.strip()
+                    await self._log(f"[bold green]Target overridden to: {target}[/bold green]")
+                elif user_override and user_override.strip() not in self.df.columns:
+                    await self._log(f"[bold red]Column '{user_override}' not found. Defaulting to '{target}'.[/bold red]")
+                else:
+                    await self._log(f"[dim]Target confirmed as '{target}'.[/dim]")
+
+                if self.user_target and self.user_target in self.df.columns:
+                    # If they explicitly passed it in the initial screen, we can still override, but now we have dynamic prompt
+                    target = self.user_target
+            else:
+                target = None
+                await self._log("[dim]Path is unsupervised/explore. No target required.[/dim]")
+
             model_recs = orch_result.get("model_recommendations", ["RandomForest"])
 
             self._update_tree_node(tree, "Orchestrator", "done", [f"Path: {path}"])
@@ -542,22 +726,132 @@ class PipelineScreen(Screen):
             await self._update_reasoning("Orchestrator", orch_result.get("reasoning", "Autonomous routing decided."))
             await self._log("")
 
-            # ── STEP 2: EDA Agent ──
-            await self._log("[dim]─── EDA Agent ───────────────────────────────────[/dim]")
-            self._update_tree_node(tree, "EDA Agent", "running")
-            trace.start("EDA Agent", f"shape={self.df.shape}")
-
+            # ── STEP 2: Domain Audit (Parallel) ──
+            await self._log("[dim]─── Domain Audit (Parallel) ──────────────────────[/dim]")
+            self._update_tree_node(tree, "Domain Sanity (Parallel)", "running")
+            
+            sanity_agent = SanityAgent(llm)
+            leakage_agent = LeakageAgent(llm)
+            
+            # Profile the dataset first so SanityAgent has the numerical summary
+            from beyondml.engine.profiler import DatasetProfiler
             profiler = DatasetProfiler(self.df, target_column=target)
             profile = profiler.run()
 
-            eda = EDAAgent(llm)
-            eda_result = await eda.run(self.df, profile, target_info, self.description, self._log)
+            # Run Sanity and Leakage in parallel
+            sanity_task = sanity_agent.run(df_summary, profile.get("numerical_summary", {}), self._log)
+            leakage_task = leakage_agent.run(target, self.description or "No description", {}, self._log)
+            
+            sanity_result, leakage_result = await asyncio.gather(sanity_task, leakage_task)
+            
+            # Rectify logical impossibilities
+            for issue in sanity_result.get("issues", []):
+                col = issue["column"]
+                if col in self.df.columns:
+                    vals = issue["invalid_values"]
+                    self.df[col] = self.df[col].replace(vals, np.nan)
+                    await self._log(f"  [yellow]Rectified[/yellow] {col}: converted {vals} to NaN")
 
-            # Render charts in log
+            # Drop leakage columns
+            leaked_applied = []
+            for rec in leakage_result.get("recommendations", []):
+                if rec["action"] == "drop" and rec["column"] in self.df.columns:
+                    self.df = self.df.drop(columns=[rec["column"]])
+                    leaked_applied.append(rec["column"])
+                    await self._log(f"  [red]Dropped[/red] {rec['column']} (Leakage risk)")
+
+            self._update_tree_node(tree, "Domain Sanity (Parallel)", "done", 
+                [f"{len(sanity_result.get('issues', []))} sanity fixes", f"{len(leaked_applied)} leaks dropped"])
+            await self._log("")
+
+            # ── Data Drift Analysis ──
+            if self.inference_path and os.path.exists(self.inference_path):
+                await self._log("[dim]─── Data Drift Analysis ────────────────────────[/dim]")
+                self._update_tree_node(tree, "Data Drift Analysis", "running")
+                try:
+                    ext = os.path.splitext(self.inference_path)[1].lower()
+                    if ext in ['.xlsx', '.xls']:
+                        df_inf = await asyncio.to_thread(pd.read_excel, self.inference_path)
+                    elif ext == '.json':
+                        df_inf = await asyncio.to_thread(pd.read_json, self.inference_path)
+                    else:
+                        df_inf = await asyncio.to_thread(pd.read_csv, self.inference_path)
+                    
+                    from beyondml.agents.drift_agent import DriftAgent
+                    drift_agent = DriftAgent(llm)
+                    drift_result = await drift_agent.run(self.df, df_inf, self._log)
+                    self._update_tree_node(tree, "Data Drift Analysis", "done")
+                    
+                    if drift_result.get("status") == "success" and drift_result.get("drift_narrative"):
+                        await self._update_reasoning("Data Drift Agent", drift_result["drift_narrative"])
+                        
+                except Exception as e:
+                    await self._log(f"  [yellow]⚠ Drift Analysis skipped/failed: {e}[/yellow]")
+                    self._update_tree_node(tree, "Data Drift Analysis", "done", ["Skipped"])
+                await self._log("")
+            else:
+                self._update_tree_node(tree, "Data Drift Analysis", "done", ["Skipped (no inf. dataset)"])
+
+            # ── STEP 3: Imputation ──
+            await self._log("[dim]─── Imputation Agent ─────────────────────────────[/dim]")
+            self._update_tree_node(tree, "Imputation", "running")
+            
+            # Re-profile to get current missing state
+            profiler = DatasetProfiler(self.df, target_column=target)
+            profile = profiler.run()
+            
+            impute_agent = ImputationAgent(llm)
+            impute_result = await impute_agent.run(df_summary, profile.get("missing_analysis", {}), self._log)
+            
+            # Apply imputation
+            for strat in impute_result.get("strategies", []):
+                col = strat["column"]
+                if col in self.df.columns:
+                    mode = strat["strategy"]
+                    if mode == "mean":
+                        self.df[col] = self.df[col].fillna(self.df[col].mean())
+                    elif mode == "median":
+                        self.df[col] = self.df[col].fillna(self.df[col].median())
+                    elif mode == "mode":
+                        self.df[col] = self.df[col].fillna(self.df[col].mode()[0] if not self.df[col].mode().empty else np.nan)
+                    elif mode == "constant":
+                        self.df[col] = self.df[col].fillna(strat.get("fill_value", 0))
+                    elif mode == "drop":
+                        self.df = self.df.drop(columns=[col])
+
+            self._update_tree_node(tree, "Imputation", "done")
+            await self._log("")
+
+            # ── STEP 4: Analysis (Parallel) ──
+            await self._log("[dim]─── Analysis Layer (Parallel) ────────────────────[/dim]")
+            self._update_tree_node(tree, "EDA Agent (Parallel)", "running")
+            self._update_tree_node(tree, "Outlier Handler (Parallel)", "running")
+            
+            # Re-profile after imputation
+            profiler = DatasetProfiler(self.df, target_column=target)
+            profile = profiler.run()
+            
+            eda_agent = EDAAgent(llm)
+            outlier_agent = OutlierAgent(llm)
+            
+            # Run EDA and Outlier detection in parallel
+            # Note: OutlierAgent needs self.df, we'll pass it a copy or let it run on the shared df 
+            # as EDA doesn't modify it.
+            async def run_eda_and_capture():
+                res = await eda_agent.run(self.df, profile, {"suggested_target": target}, self.description, self._log)
+                self.interactive_charts = res.get("interactive_charts", [])
+                return res
+
+            eda_task = run_eda_and_capture()
+            outlier_task = outlier_agent.run(self.df, profile.get("outlier_summary", {}), profile, self._log, self._get_user_input)
+            
+            eda_result, outlier_result = await asyncio.gather(eda_task, outlier_task)
+            self.df = outlier_result["df"] # Update df with outlier changes
+
+            # Process EDA Results (charts)
             for chart_name, chart_str in eda_result.get("rendered_charts", []):
                 await self._log(f"\n[bold magenta]── {chart_name} ──[/bold magenta]")
                 try:
-                    # Safely parse raw ANSI from plotext
                     ansi_chart = Text.from_ansi(chart_str, no_wrap=True)
                     await self._log(ansi_chart)
                 except Exception:
@@ -572,43 +866,17 @@ class PipelineScreen(Screen):
             if profile.get("target_analysis"):
                 nu = profile["target_analysis"].get("num_unique", "—")
                 self._update_stat("stat-classes", f"classes: [bold]{nu}[/bold]")
-            tr = int(self.df.shape[0] * 0.8)
-            te = self.df.shape[0] - tr
-            self._update_stat("stat-split", f"train/test: {tr} / {te}")
-
-            self._update_tree_node(tree, "EDA Agent", "done",
+            
+            self._update_tree_node(tree, "EDA Agent (Parallel)", "done",
                 [f"Target: {confirmed_target}", f"{len(eda_result.get('eda_insights', []))} insights"])
-            trace.finish(f"target={confirmed_target}, insights={len(eda_result.get('eda_insights', []))}")
-            await self._update_reasoning("EDA Agent", eda_result.get("narrative", "Data profiling and chart generation complete."))
-            await self._log("")
-
-            # For explore-only path, stop here
-            if path == "explore":
-                await self._log("\n[bold green]✓ Exploration complete![/bold green]")
-                self._update_tree_node(tree, "Export", "done")
-                return
-
-            # Re-profile with confirmed target
-            if confirmed_target and confirmed_target != target:
-                profiler = DatasetProfiler(self.df, target_column=confirmed_target)
-                profile = profiler.run()
-
-            # ── STEP 3: Outlier Handler ──
-            await self._log("[dim]─── Outlier Handler ─────────────────────────────[/dim]")
-            self._update_tree_node(tree, "Outlier Handler", "running")
-            trace.start("Outlier Handler")
-
-            outlier_agent = OutlierAgent(llm)
-            outlier_result = await outlier_agent.run(
-                self.df, profile.get("outlier_summary", {}), profile, self._log, self._get_user_input
-            )
-            self.df = outlier_result["df"]
-
-            self._update_tree_node(tree, "Outlier Handler", "done",
+            self._update_tree_node(tree, "Outlier Handler (Parallel)", "done",
                 [f"Strategy: {outlier_result['outlier_strategy']}"])
-            trace.finish(f"strategy={outlier_result['outlier_strategy']}")
-            await self._update_reasoning("Outlier Handler", f"Applied {outlier_result['outlier_strategy']} strategy based on distribution analysis.")
             await self._log("")
+
+            if path in ["explore", "dimensionality_reduction"]:
+                self._update_tree_node(tree, "Explore / PCA", "done")
+                await self._log("\n[bold green]✓ Exploration and Dimensionality Reduction complete![/bold green]")
+                return
 
             # --- START ITERATIVE LOOP ---
             max_iterations = 3
@@ -686,37 +954,107 @@ class PipelineScreen(Screen):
                     await self._log("\n[bold green]✓ Unsupervised analysis complete![/bold green]")
                     return
 
-                # ── STEP 5: GA Trainer (supervised) ──
-                await self._log("[dim]─── GA Trainer ──────────────────────── [running] ──[/dim]")
-                self._update_tree_node(tree, "GA Trainer", "running")
+                if path == "supervised":
+                    # ── STEP 5: GA Trainer (supervised) ──
+                    await self._log("[dim]─── GA Trainer ──────────────────────── [running] ──[/dim]")
+                    self._update_tree_node(tree, "GA Trainer (Supervised)", "running")
 
-                # Re-profile with new features
-                profiler = DatasetProfiler(self.df, target_column=confirmed_target)
-                profile = profiler.run()
-
-                async def on_ga_progress(gen_summary):
-                    self._fitness_data.append(gen_summary["best_fitness"] * 100)
+                    # Re-profile with new features
+                    profiler = DatasetProfiler(self.df, target_column=confirmed_target)
                     try:
-                        sparkline = self.query_one("#fitness-sparkline", Sparkline)
-                        sparkline.data = self._fitness_data.copy()
-                    except Exception:
-                        pass
+                        profile = profiler.run()
+                        if not profile:
+                            profile = {"target_analysis": {"target_type": "classification"}, "numerical_summary": {}}
+                    except Exception as e:
+                        await self._log(f"[yellow]Warning profiling failed: {e}. Using fallback profile.[/yellow]")
+                        profile = {"target_analysis": {"target_type": "classification"}, "numerical_summary": {}}
+                    
+                    if "target_analysis" not in profile or profile["target_analysis"] is None:
+                        profile["target_analysis"] = {"target_type": "classification"}
 
-                ga_agent = GATrainerAgent(llm)
-                ga_result = await ga_agent.run(
-                    df=self.df,
-                    target_column=confirmed_target,
-                    profile=profile,
-                    model_choice=model_choice,
-                    log=self._log,
-                    get_user_input=self._get_user_input,
-                    on_ga_progress=on_ga_progress,
-                    pop_size=current_pop_size,
-                    generations=current_generations,
-                )
+                    async def on_ga_progress(gen_summary):
+                        self._fitness_data.append(gen_summary["best_fitness"] * 100)
+                        try:
+                            sparkline = self.query_one("#fitness-sparkline", Sparkline)
+                            sparkline.data = self._fitness_data.copy()
+                        except Exception:
+                            pass
 
-                self._update_tree_node(tree, "GA Trainer", "done",
-                    [f"Best: {ga_result['best_cv_score']:.4f}", f"Model: {ga_result['model_type']}"])
+                    ga_agent = GATrainerAgent(llm)
+                    ga_result = await ga_agent.run(
+                        df=self.df,
+                        target_column=confirmed_target,
+                        profile=profile,
+                        model_choice=model_choice,
+                        log=self._log,
+                        get_user_input=self._get_user_input,
+                        on_ga_progress=on_ga_progress,
+                        pop_size=current_pop_size,
+                        generations=current_generations,
+                    )
+                    best_params = ga_result["best_params"]
+                    model_type = ga_result["model_type"]
+
+                    self._update_tree_node(tree, "GA Trainer (Supervised)", "done",
+                        [f"Best: {ga_result['best_cv_score']:.4f}", f"Model: {ga_result['model_type']}"])
+
+                    # ── STEP 5.5: Ensemble Agent ──
+                    top_genomes = ga_result.get("top_genomes", [])
+                    prebuilt_model = None
+                    if len(top_genomes) > 1:
+                        await self._log("\n[dim]─── Ensemble Agent ────────────────────────────[/dim]")
+                        self._update_tree_node(tree, "Ensemble", "running")
+                        
+                        from beyondml.agents.ensemble_agent import EnsembleAgent
+                        ensemble_agent = EnsembleAgent(llm)
+                        ensemble_result = await ensemble_agent.run(
+                            df=self.df,
+                            target_column=confirmed_target,
+                            profile=profile,
+                            top_genomes=top_genomes,
+                            problem_type=profile["target_analysis"]["target_type"],
+                            log=self._log,
+                            strategy="stacking"
+                        )
+                        
+                        ens_score = ensemble_result["test_score"]
+                        self._update_tree_node(tree, "Ensemble", "done", [f"Score: {ens_score:.4f}"])
+                        
+                        if ens_score > ga_result["best_cv_score"]:
+                            await self._log(f"  [bold green]Ensemble outperforms single best model![/bold green]")
+                            best_params = {"strategy": "stacking", "base_models": ensemble_result["base_models"]}
+                            model_type = ensemble_result["model_type"]
+                            from beyondml.engine.ensemble import EnsembleEngine
+                            engine = EnsembleEngine(profile["target_analysis"]["target_type"])
+                            prebuilt_model = engine.build_stacking(top_genomes)
+                
+                elif path == "deep_learning":
+                    # ── STEP 5: DL Trainer ──
+                    await self._log("[dim]─── DL Trainer ──────────────────────── [running] ──[/dim]")
+                    self._update_tree_node(tree, "DL Trainer (Neural Net)", "running")
+
+                    dl_agent = DeepLearningAgent(llm)
+                    dl_result = await dl_agent.run(
+                        df=self.df,
+                        target_column=confirmed_target,
+                        problem_type=profile["target_analysis"]["target_type"],
+                        log=self._log,
+                        epochs=10
+                    )
+                    
+                    # Mock GA result structure for Evaluator
+                    ga_result = {
+                        "best_params": {},
+                        "model_type": "SimpleMLP",
+                        "best_cv_score": dl_result["test_score"]
+                    }
+                    best_params = {}
+                    model_type = "SimpleMLP"
+
+                    self._update_tree_node(tree, "DL Trainer (Neural Net)", "done",
+                        [f"Acc: {dl_result['test_score']:.4f}"])
+                    prebuilt_model = None
+
                 await self._log("")
 
                 # ── STEP 6: Evaluator ──
@@ -728,15 +1066,40 @@ class PipelineScreen(Screen):
                     df=self.df,
                     target_column=confirmed_target,
                     profile=profile,
-                    best_params=ga_result["best_params"],
-                    model_type=ga_result["model_type"],
+                    best_params=best_params,
+                    model_type=model_type,
                     problem_type=profile["target_analysis"]["target_type"],
                     log=self._log,
+                    prebuilt_model=locals().get("prebuilt_model", None)
                 )
 
                 self._update_tree_node(tree, "Evaluator", "done",
                     [f"Score: {eval_result['test_score']:.4f}"])
                 await self._update_reasoning("Evaluator", eval_result.get("eval_narration", "Final model performance validated."))
+                
+                # ── STEP 6.5: Explainability ──
+                import joblib
+                from beyondml.agents.explainability_agent import ExplainabilityAgent
+                
+                await self._log("\n[dim]─── Explainability Agent ────────────────────────[/dim]")
+                self._update_tree_node(tree, "Explainability", "running")
+                
+                try:
+                    fitted_pipe = joblib.load(eval_result["model_path"])
+                    X_eval = self.df.drop(columns=[confirmed_target]) if confirmed_target in self.df.columns else self.df
+                    
+                    explain_agent = ExplainabilityAgent(llm)
+                    explain_result = await explain_agent.run(
+                        model_pipeline=fitted_pipe,
+                        X_eval=X_eval,
+                        target_column=confirmed_target,
+                        problem_type=profile["target_analysis"]["target_type"],
+                        log=self._log
+                    )
+                    self._update_tree_node(tree, "Explainability", "done")
+                except Exception as e:
+                    await self._log(f"  [yellow]⚠ Explainability skipped: {e}[/yellow]")
+                    self._update_tree_node(tree, "Explainability", "done", ["Skipped"])
                 
                 # ── STEP 7: Reflection ──
                 from beyondml.agents.reflection_agent import ReflectionAgent
@@ -800,6 +1163,19 @@ class PipelineScreen(Screen):
             import traceback
             await self._log(f"[dim]{traceback.format_exc()}[/dim]")
 
+    def action_view_charts(self):
+        if not hasattr(self, 'interactive_charts') or not self.interactive_charts:
+            self.notify("No interactive charts have been generated yet.", severity="warning")
+            return
+            
+        import webbrowser
+        self.notify(f"Opening {len(self.interactive_charts)} charts in browser...", severity="information")
+        for chart_path in self.interactive_charts:
+            try:
+                webbrowser.open('file://' + chart_path)
+            except Exception as e:
+                self.notify(f"Failed to open chart: {e}", severity="error")
+
     def action_save(self):
         self.notify("State saved!", severity="information")
 
@@ -830,7 +1206,17 @@ class BeyondMLApp(App):
     ]
 
     def on_mount(self):
-        self.push_screen(WelcomeScreen())
+        if not check_config():
+            self.push_screen(ConfigScreen(), self._after_config)
+        else:
+            self.push_screen(WelcomeScreen())
+
+    def _after_config(self, success: bool):
+        if success:
+            self.push_screen(WelcomeScreen())
+        else:
+            # If they canceled setup somehow, we can't really proceed
+            self.exit()
 
 
 if __name__ == "__main__":

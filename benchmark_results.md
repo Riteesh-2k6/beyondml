@@ -1,5 +1,8 @@
 # BeyondML Benchmark Report (PMLB)
 
-| Dataset | ORI | Best Mu_CV | Fitness | Gap | Model |
-|---|---|---|---|---|---|
-| titanic | 0.282 | 0.7818 | 0.7465 | 0.0029 | RandomForest |
+| Dataset | Path | Model | Mu_CV / Score |
+|---|---|---|---|
+| titanic | supervised | LogisticRegression | 0.7822 |
+| breast_cancer | supervised | LogisticRegression | 0.7588 |
+| iris | supervised | LogisticRegression | 0.9600 |
+| wine_recognition | supervised | RandomForest | 0.9554 |

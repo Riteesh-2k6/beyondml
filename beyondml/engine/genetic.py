@@ -11,11 +11,10 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.svm import SVC, SVR
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from joblib import Parallel, delayed
 
 from .metrics import calculate_metrics
@@ -27,31 +26,38 @@ def _evaluate_genome_worker(
     y: pd.Series,
     feature_names: List[str],
     numeric_features: List[str],
+    categorical_features: List[str],
     problem_type: str,
     profile: Dict[str, Any],
 ) -> Tuple[float, Dict]:
     """Standalone worker function for parallel evaluation to avoid pickling issues."""
     selected = [f for i, f in enumerate(feature_names) if genome.feature_mask[i] == 1]
     numeric_selected = [f for f in selected if f in numeric_features]
-    if not numeric_selected:
+    categorical_selected = [f for f in selected if f in categorical_features]
+    
+    if not selected:
         return -1.0, {}
 
-    X_sub = X[numeric_selected]
+    X_sub = X[selected]
+
+    # Handle Imbalance
+    has_imbalance = profile.get("target_analysis", {}).get("imbalance_risk", False)
+    weight_mode = "balanced" if has_imbalance and problem_type == "classification" else None
 
     try:
         if genome.model_choice == "RandomForest":
             model = (
-                RandomForestClassifier(**genome.hparams, random_state=42)
+                RandomForestClassifier(**genome.hparams, class_weight=weight_mode, random_state=42)
                 if problem_type == "classification"
                 else RandomForestRegressor(**genome.hparams, random_state=42)
             )
         elif genome.model_choice == "LogisticRegression":
-            model = LogisticRegression(**genome.hparams)
+            model = LogisticRegression(**genome.hparams, class_weight=weight_mode)
         elif genome.model_choice == "SVM":
-            model = SVC(**genome.hparams) if problem_type == "classification" else SVR(**genome.hparams)
+            model = SVC(**genome.hparams, class_weight=weight_mode) if problem_type == "classification" else SVR(**genome.hparams)
         elif genome.model_choice == "DecisionTree":
             model = (
-                DecisionTreeClassifier(**genome.hparams, random_state=42)
+                DecisionTreeClassifier(**genome.hparams, class_weight=weight_mode, random_state=42)
                 if problem_type == "classification"
                 else DecisionTreeRegressor(**genome.hparams, random_state=42)
             )
@@ -70,7 +76,24 @@ def _evaluate_genome_worker(
         else:
             model = LinearRegression()
 
-        pipe = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), model)
+        # Build Preprocessing Pipeline
+        numeric_transformer = make_pipeline(
+            SimpleImputer(strategy="median"),
+            StandardScaler()
+        )
+        categorical_transformer = make_pipeline(
+            SimpleImputer(strategy="constant", fill_value="missing"),
+            OneHotEncoder(handle_unknown="ignore")
+        )
+        
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ("num", numeric_transformer, numeric_selected),
+                ("cat", categorical_transformer, categorical_selected),
+            ]
+        )
+
+        pipe = make_pipeline(preprocessor, model)
 
         # Perform K-Fold CV
         cv_scores = cross_val_score(
@@ -118,9 +141,10 @@ def _evaluate_genome_worker(
 class Genome:
     """Encodes a model configuration: model_type, hyperparameters, feature_mask."""
 
-    def __init__(self, problem_type: str, num_features: int, model_choice: str = None):
+    def __init__(self, problem_type: str, num_features: int, model_choice: str = None, warm_start: bool = False):
         self.problem_type = problem_type
         self.num_features = num_features
+        self.warm_start = warm_start
 
         if model_choice:
             self.model_choice = model_choice
@@ -138,6 +162,25 @@ class Genome:
         self.metrics = {}
 
     def _init_hparams(self) -> Dict[str, Any]:
+        if self.warm_start:
+            # Scikit-learn defaults or "best practice" starting points
+            if self.model_choice == "RandomForest":
+                return {"n_estimators": 100, "max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1, "max_features": "sqrt"}
+            elif self.model_choice == "LogisticRegression":
+                return {"C": 1.0, "max_iter": 1000}
+            elif self.model_choice == "LinearRegression":
+                return {}
+            elif self.model_choice == "SVM":
+                return {"C": 1.0, "kernel": "rbf"}
+            elif self.model_choice == "DecisionTree":
+                return {"max_depth": None, "min_samples_split": 2}
+            elif self.model_choice == "KNN":
+                return {"n_neighbors": 5}
+            elif self.model_choice == "GradientBoosting":
+                return {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3}
+            return {}
+
+        # Random starting points
         if self.model_choice == "RandomForest":
             return {
                 "n_estimators": random.choice([50, 100, 150, 200, 250]),
@@ -194,10 +237,12 @@ class GeneticModelOptimizer:
         self.y = df[target_column]
         self.feature_names = self.X.columns.tolist()
         self.numeric_features = [c for c in self.feature_names if pd.api.types.is_numeric_dtype(df[c])]
+        self.categorical_features = [c for c in self.feature_names if not pd.api.types.is_numeric_dtype(df[c])]
 
+        # Warm-start the first genome, others are random
         self.population = [
-            Genome(self.problem_type, len(self.feature_names), model_choice=self.model_choice)
-            for _ in range(pop_size)
+            Genome(self.problem_type, len(self.feature_names), model_choice=self.model_choice, warm_start=(i == 0))
+            for i in range(pop_size)
         ]
 
     def evolve(self) -> Tuple[List[Dict], "Genome"]:
@@ -212,6 +257,7 @@ class GeneticModelOptimizer:
                     self.y,
                     self.feature_names,
                     self.numeric_features,
+                    self.categorical_features,
                     self.problem_type,
                     self.profile,
                 )
@@ -279,6 +325,7 @@ class GeneticModelOptimizer:
             self.y,
             self.feature_names,
             self.numeric_features,
+            self.categorical_features,
             self.problem_type,
             self.profile,
         )

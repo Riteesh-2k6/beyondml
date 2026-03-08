@@ -26,6 +26,22 @@ class OllamaProvider(LLMProvider):
     def model_name(self) -> str:
         return f"ollama/{self._model}"
 
+    def test_connection(self) -> bool:
+        """Check if Ollama is running and has the model."""
+        try:
+            # Check server version/tags as a lightweight health check
+            tags_url = f"{self._host.rstrip('/')}/api/tags"
+            response = requests.get(tags_url, timeout=2)
+            if response.status_code != 200:
+                return False
+            
+            # Check if our specific model exists in tags
+            data = response.json()
+            models = [m.get("name") for m in data.get("models", [])]
+            return self._model in models or f"{self._model}:latest" in models
+        except Exception:
+            return False
+
     def chat(
         self,
         messages: List[Dict[str, str]],

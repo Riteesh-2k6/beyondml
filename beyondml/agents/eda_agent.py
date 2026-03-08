@@ -13,6 +13,7 @@ import numpy as np
 from ..llm.base import LLMProvider
 from ..engine.profiler import DatasetProfiler, TargetIdentifier
 from ..charts import render_histogram, render_scatter, render_correlation_matrix, render_box_plot
+from ..interactive_charts import generate_histogram, generate_scatter, generate_box, generate_correlation, generate_pca
 
 
 SYSTEM_PROMPT = """You are a senior data scientist performing exploratory data analysis.
@@ -70,6 +71,7 @@ class EDAAgent:
 
         # Render charts
         rendered_charts = []
+        interactive_charts = []
         chart_recs = eda_result.get("chart_recs", [])
         num_cols = profile["feature_types"]["numerical"]
 
@@ -77,6 +79,19 @@ class EDAAgent:
         if len(num_cols) >= 2:
             corr_str = render_correlation_matrix(profile.get("correlation_matrix", {}))
             rendered_charts.append(("Correlation Matrix", corr_str))
+            
+            # Interactive correlation
+            try:
+                ic_path = generate_correlation(df)
+                if ic_path: interactive_charts.append(ic_path)
+            except Exception: pass
+            
+            # Dimensionality Reduction (PCA) for interactive views
+            try:
+                pca_path = generate_pca(df, target_info.get("suggested_target"))
+                if pca_path: interactive_charts.append(pca_path)
+            except Exception: pass
+
             await log(f"\n  [bold magenta]📊 CORRELATION: [/bold magenta][italic]{eda_result.get('suggested_target', 'None')}[/italic]")
 
         for rec in chart_recs[:4]:
@@ -88,18 +103,36 @@ class EDAAgent:
                     if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
                         chart_str = render_histogram(df[col], title=f"Distribution of {col}")
                         rendered_charts.append((f"Histogram: {col}", chart_str))
+                        
+                        # Interactive histogram
+                        ic_path = generate_histogram(df, col)
+                        if ic_path: interactive_charts.append(ic_path)
+
                 elif chart_type == "scatter" and len(columns) >= 2:
                     c1, c2 = columns[0], columns[1]
                     if c1 in df.columns and c2 in df.columns:
                         chart_str = render_scatter(df[c1], df[c2], title=f"Scatter: {c1} vs {c2}")
                         rendered_charts.append((f"Scatter: {c1} vs {c2}", chart_str))
+                        
+                        # Interactive scatter
+                        color_col = target_info.get("suggested_target") if target_info.get("suggested_target") in df.columns else None
+                        ic_path = generate_scatter(df, c1, c2, color_col=color_col)
+                        if ic_path: interactive_charts.append(ic_path)
+
                 elif chart_type == "box" and columns:
                     valid_cols = [c for c in columns if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
                     if valid_cols:
                         chart_str = render_box_plot(df, valid_cols, title="Box Plots")
                         rendered_charts.append(("Box Plots", chart_str))
+                        
+                        # Interactive box
+                        ic_path = generate_box(df, valid_cols)
+                        if ic_path: interactive_charts.append(ic_path)
             except Exception as e:
                 await log(f"  [dim]⚠ Chart render failed: {e}[/dim]")
+
+        if interactive_charts:
+            await log(f"\n  [bold green]✓ High-quality interactive graphs generated. Press 'V' to open them in your browser![/bold green]")
 
         if rendered_charts:
             await log(f"\n  [green]✓ Rendered {len(rendered_charts)} charts[/green]")
@@ -119,6 +152,7 @@ class EDAAgent:
             "eda_insights": insights,
             "chart_recs": chart_recs,
             "rendered_charts": rendered_charts,
+            "interactive_charts": interactive_charts,
             "suggested_target": target,
             "target_confidence": eda_result.get("target_confidence", 0),
             "task_type": eda_result.get("task_type", "classification"),

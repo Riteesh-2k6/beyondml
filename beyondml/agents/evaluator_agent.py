@@ -44,11 +44,16 @@ class EvaluatorAgent:
         model_type: str,
         problem_type: str,
         log: Callable[[str], Awaitable[None]],
+        prebuilt_model: Any = None,
     ) -> Dict[str, Any]:
         await log("[bold blue]● Evaluator[/bold blue]  Training final model and evaluating...")
 
         # Build the final model with best params
-        model_obj = self._build_model(model_type, best_params, problem_type)
+        if prebuilt_model is not None:
+            model_obj = prebuilt_model
+        else:
+            model_obj = self._build_model(model_type, best_params, problem_type)
+
 
         # Train and evaluate
         pipeline = SupervisedPipeline(df, target_column, profile)
@@ -108,7 +113,7 @@ class EvaluatorAgent:
                 return RandomForestClassifier(**clean_params, random_state=42)
             return RandomForestRegressor(**clean_params, random_state=42)
         elif model_type == "LogisticRegression":
-            return LogisticRegression(**params, max_iter=1000)
+            return LogisticRegression(**clean_params, max_iter=1000)
         elif model_type == "LinearRegression":
             return LinearRegression()
         else:

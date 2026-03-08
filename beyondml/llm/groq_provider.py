@@ -30,6 +30,15 @@ class GroqProvider(LLMProvider):
     def model_name(self) -> str:
         return self._model
 
+    def test_connection(self) -> bool:
+        """Check if Groq API is reachable."""
+        try:
+            # list models as a health check
+            self._client.models.list()
+            return True
+        except Exception:
+            return False
+
     def chat(
         self,
         messages: List[Dict[str, str]],

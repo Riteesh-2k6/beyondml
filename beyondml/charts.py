@@ -84,7 +84,7 @@ def render_box_plot(df: pd.DataFrame, columns: List[str] = None, title: str = ""
     plt.clear_data()
     cols = columns or df.select_dtypes(include=[np.number]).columns.tolist()[:5]
     data = [df[c].dropna().values.tolist() for c in cols]
-    plt.box(data, labels=cols)
+    plt.box(data, label=cols)
     plt.title(title or "Box Plots")
     plt.plotsize(width, height)
     plt.theme("dark")

@@ -158,10 +158,16 @@ class GATrainerAgent:
         await log(f"  Best Model: {best_genome.model_choice}")
         await log(f"  Best Params: {best_genome.hparams}")
 
+        # Expose sorted population for ensemble stacking
+        sorted_pop = sorted(optimizer.population, key=lambda x: x.fitness, reverse=True)
+        top_n = sorted_pop[:min(5, len(sorted_pop))]
+        await log(f"  Top-{len(top_n)} genomes ready for ensemble stacking")
+
         return {
             "ga_history": ga_history or history,
             "best_params": best_genome.hparams,
             "best_cv_score": best_genome.fitness,
             "model_type": best_genome.model_choice,
             "best_metrics": best_genome.metrics,
+            "top_genomes": top_n,
         }

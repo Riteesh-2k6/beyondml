@@ -44,6 +44,16 @@ class LLMProvider(ABC):
         ...
 
     @abstractmethod
+    def test_connection(self) -> bool:
+        """
+        Check if the LLM provider is reachable.
+
+        Returns:
+            True if connected, False otherwise.
+        """
+        ...
+
+    @abstractmethod
     async def chat_stream(
         self,
         messages: List[Dict[str, str]],

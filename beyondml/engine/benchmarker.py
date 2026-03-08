@@ -13,7 +13,7 @@ from pmlb import fetch_data, dataset_names
 
 # Load API keys
 load_dotenv()
-from beyondml.engine.profiler import DatasetProfiler
+from beyondml.engine.profiler import DatasetProfiler, TargetIdentifier
 from beyondml.engine.genetic import GeneticModelOptimizer
 from beyondml.agents.orchestrator import OrchestratorAgent
 from beyondml.agents.ga_trainer import GATrainerAgent
@@ -24,54 +24,101 @@ class PMLBRunner:
 
     def __init__(self, datasets: List[str] = None):
         if datasets is None:
-            self.datasets = ["titanic", "car"] # Lite version for demo
+            # A mix of classification and regression
+            self.datasets = ["titanic", "breast_cancer", "iris", "wine_recognition", "diabetes"] 
         else:
             self.datasets = datasets
         self.results = []
 
     async def run_benchmark(self):
-        print("Starting PMLB Benchmark Suite...")
+        print("Starting BeyondML Standardized Benchmark Suite...")
         llm = get_llm_provider()
+        orchestrator = OrchestratorAgent(llm)
         
         for name in self.datasets:
             print(f"\n[Benchmark: {name}] Fetching data...")
             try:
                 X, y = fetch_data(name, return_X_y=True, local_cache_dir='./data/pmlb_cache')
                 df = pd.DataFrame(X)
+                df.columns = [str(c) for c in df.columns]
                 df['target'] = y
                 
                 print(f"  Shape: {df.shape}")
                 
-                # 1. Profile
-                profiler = DatasetProfiler(df, target_column='target')
-                profile = profiler.run()
-                ori = profile.get('overfitting_risk_index', {}).get('score', 0.5)
-                print(f"  ORI Score: {ori:.4f}")
-
-                # 2. GA Optimization (Run a compact search for benchmarks)
-                optimizer = GeneticModelOptimizer(
-                    df=df,
-                    target_column='target',
-                    profile=profile,
-                    pop_size=5,
-                    generations=2,
-                    model_choice="RandomForest"
+                async def mock_log(msg): print(f"    {msg}")
+                
+                # 1. Orchestrate
+                df_summary = f"Rows: {len(df)}, Columns: {len(df.columns)}"
+                target_id = TargetIdentifier(df)
+                target_info = target_id.identify()
+                
+                decision = await orchestrator.run(
+                    df_summary=df_summary,
+                    description=f"PMLB Dataset: {name}",
+                    target_info=target_info,
+                    user_path_choice="auto",
+                    log=mock_log
                 )
                 
-                print(f"  Running GA Evolution...")
-                history, best = optimizer.evolve()
+                path = decision["path"]
+                target = decision.get("suggested_target", "target")
+                model_recs = decision.get("model_recommendations", ["RandomForest"])
+                raw_model = model_recs[0] if model_recs else "RandomForest"
                 
-                res = {
-                    "dataset": name,
-                    "ori": ori,
-                    "best_fitness": best.fitness,
-                    "mu_cv": best.metrics.get("mu_cv", 0),
-                    "sigma_cv": best.metrics.get("sigma_cv", 0),
-                    "gap": best.metrics.get("gap", 0),
-                    "model": best.model_choice
+                # Normalize LLM model names → GA-compatible names
+                MODEL_NORMALIZE = {
+                    "logistic regression": "LogisticRegression",
+                    "logisticregression": "LogisticRegression",
+                    "random forest": "RandomForest",
+                    "randomforest": "RandomForest",
+                    "gradient boosting": "GradientBoosting",
+                    "gradientboosting": "GradientBoosting",
+                    "decision tree": "DecisionTree",
+                    "decisiontree": "DecisionTree",
+                    "linear regression": "LinearRegression",
+                    "linearregression": "LinearRegression",
+                    "svm": "SVM",
+                    "support vector machine": "SVM",
+                    "knn": "KNN",
+                    "k-nearest neighbors": "KNN",
                 }
+                model_choice = MODEL_NORMALIZE.get(raw_model.lower().strip(), raw_model)
+                print(f"  Orchestrator chose: {path} | Model: {model_choice}")
+
+                # 2. Execute Branch
+                if path == "supervised":
+                    optimizer = GeneticModelOptimizer(
+                        df=df,
+                        target_column=target,
+                        profile=DatasetProfiler(df, target_column=target).run(),
+                        pop_size=5,
+                        generations=3,
+                        model_choice=model_choice
+                    )
+                    history, best = optimizer.evolve()
+                    res = {
+                        "dataset": name,
+                        "path": path,
+                        "best_fitness": best.fitness,
+                        "model": best.model_choice,
+                        "mu_cv": best.metrics.get("mu_cv", 0)
+                    }
+                elif path == "deep_learning":
+                    from beyondml.agents.dl_agent import DeepLearningAgent
+                    dl_agent = DeepLearningAgent(llm)
+                    dl_res = await dl_agent.run(df, target, problem_type="classification", log=mock_log, epochs=3)
+                    res = {
+                        "dataset": name,
+                        "path": path,
+                        "best_fitness": dl_res.get("test_score", 0),
+                        "model": "SimpleMLP",
+                        "mu_cv": dl_res.get("test_score", 0)
+                    }
+                else:
+                    res = {"dataset": name, "path": path, "best_fitness": 0, "model": "N/A", "mu_cv": 0}
+
                 self.results.append(res)
-                print(f"  Best Mu_CV: {res['mu_cv']:.4f} | Fitness: {best.fitness:.4f}")
+                print(f"  Result: {res['mu_cv']:.4f}")
                 
             except Exception as e:
                 print(f"  Error on {name}: {e}")
@@ -79,18 +126,21 @@ class PMLBRunner:
         self._export_results()
 
     def _export_results(self):
+        if not self.results:
+            print("No results to export.")
+            return
+
         df_res = pd.DataFrame(self.results)
         print("\nBENCHMARK SUMMARY")
         print(df_res.to_string())
         
-        # Save to markdown artifact-like format for the user
         report_path = "benchmark_results.md"
         with open(report_path, "w") as f:
             f.write("# BeyondML Benchmark Report (PMLB)\n\n")
-            f.write("| Dataset | ORI | Best Mu_CV | Fitness | Gap | Model |\n")
-            f.write("|---|---|---|---|---|---|\n")
+            f.write("| Dataset | Path | Model | Mu_CV / Score |\n")
+            f.write("|---|---|---|---|\n")
             for r in self.results:
-                f.write(f"| {r['dataset']} | {r['ori']:.3f} | {r['mu_cv']:.4f} | {r['best_fitness']:.4f} | {r['gap']:.4f} | {r['model']} |\n")
+                f.write(f"| {r['dataset']} | {r['path']} | {r['model']} | {r['mu_cv']:.4f} |\n")
         
         print(f"\nReport saved to {report_path}")
 
