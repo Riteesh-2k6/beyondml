@@ -70,6 +70,17 @@ Dataset → Orchestrator → EDA Agent → Outlier Agent → Feature Agent
 
 ## 🛠️ Usage
 
+### Docker (Recommended for Reproducibility)
+
+Run the completely isolated and reproduced BeyondML environment via Docker:
+
+```bash
+# Build and run the TUI natively in Docker
+docker-compose run --rm beyondml beyondml run
+```
+
+_Note: The `workspace` and `data` directories are mounted automatically, so your files are saved locally. You only need to set your keys in `.env`._
+
 ### TUI (Interactive)
 
 ```bash

@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  beyondml:
+    build: .
+    image: beyondml:latest
+    container_name: beyondml_app
+    # Ensure TUI and interactive terminal works
+    stdin_open: true # equivalent to docker run -i
+    tty: true        # equivalent to docker run -t
+    volumes:
+      - ./workspace:/app/workspace
+      - ./data:/app/data
+    env_file:
+      - .env
