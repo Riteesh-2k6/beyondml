@@ -6,6 +6,34 @@ BeyondML is an autonomous machine learning pipeline that uses multiple specializ
 
 ---
 
+## 🎯 Problem
+
+Building machine learning pipelines is traditionally a tedious, manually iterative process requiring deep expertise in EDA, feature engineering, and hyperparameter tuning. While automation tools exist, they are often opaque "black boxes" that don't provide visibility into their intermediate decision-making or data transformations, making them hard to trust and debug.
+
+## 💡 Approach
+
+BeyondML addresses this by combining the reasoning capabilities of LLMs with a highly observable, terminal-native UI. We use a multi-agent orchestration architecture where specialized AI agents (EDA, Feature Engineering, Outlier Handling, and Reflection) communicate to systematically process data. By pairing LLM-driven feature engineering with rigorous, non-LLM Genetic Algorithms for optimization, the platform balances intelligent heuristics with mathematical precision—all completely transparent to the user via the TUI.
+
+## 🔄 Iterations
+
+1. **V1 (Core ML Pipeline):** Built the foundational pipeline architecture supporting standard supervised ML models and a basic TUI layout.
+2. **V2 (Genetic Optimization & Orchestration):** Introduced native Genetic Algorithm optimization for hyperparameters and structured the engine layout.
+3. **V3 (Autonomous Agents):** Integrated Groq and local Ollama. Added LLM-driven EDA, Outlier, and Feature Engineering agents for autonomous data preparation.
+4. **V4 (Unsupervised & Visualizations):** Added support for PCA, DBSCAN, KMeans, and interactive Plotly charts to supplement terminal-native rendering.
+5. **V5 (Performance & Workflow):** Parallelized agent execution using `asyncio` to drastically reduce processing bottlenecks and exposed customizable settings like dynamic train/test splits.
+
+## 📐 Key Design Choices
+
+- **Terminal-Native TUI:** Built using `Textual` and `plotext` rather than a standard web interface to offer developers immediate, lightweight accessibility without managing frontend/backend server states.
+- **Micro-Agent Architecture:** Separated the LLM capabilities into modular, single-responsibility agents (EDA, Leakage, Sanity, Feature, Reflection). This allows parallel execution, improves context utilization, and makes the pipeline's logic highly debuggable.
+- **Hybrid Optimization:** Leveraged LLMs strictly for qualitative decisions (feature generation, sanity checks) and evolutionary search (Genetic Algorithms) for exact, quantitative tasks (hyperparameter tuning).
+
+## ⏱️ Daily Time Commitment
+
+The design and implementation of BeyondML evolved over several weeks, involving a consistent daily time commitment of approximately **2 to 4 hours**. Time was roughly split between core ML architecture, asynchronous agent orchestration, LLM prompt engineering, and UI state management.
+
+---
+
 ## ⚡ Quick Start
 
 The fastest way to install BeyondML globally (like a standalone CLI app) is using `pipx` or `pip`:
