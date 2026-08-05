@@ -81,6 +81,9 @@ docker-compose run --rm beyondml beyondml run
 
 _Note: The `workspace` and `data` directories are mounted automatically, so your files are saved locally. You only need to set your keys in `.env`._
 
+**Using Local Ollama with Docker:**
+The `docker-compose.yml` is pre-configured to point `OLLAMA_HOST` to `http://host.docker.internal:11434`. Ensure Ollama is running on your host machine before starting the Docker container.
+
 ### TUI (Interactive)
 
 ```bash

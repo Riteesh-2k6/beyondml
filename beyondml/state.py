@@ -46,6 +46,7 @@ class MLState(TypedDict, total=False):
     model_path: str
 
     # ── Control Flow & TUI
+    use_ensemble: bool
     current_node: str
     awaiting_input: bool
     input_prompt: str

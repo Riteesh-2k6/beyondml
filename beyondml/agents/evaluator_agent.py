@@ -44,6 +44,7 @@ class EvaluatorAgent:
         model_type: str,
         problem_type: str,
         log: Callable[[str], Awaitable[None]],
+        test_size: float = 0.20,
         prebuilt_model: Any = None,
     ) -> Dict[str, Any]:
         await log("[bold blue]● Evaluator[/bold blue]  Training final model and evaluating...")
@@ -56,7 +57,7 @@ class EvaluatorAgent:
 
 
         # Train and evaluate
-        pipeline = SupervisedPipeline(df, target_column, profile)
+        pipeline = SupervisedPipeline(df, target_column, profile, test_size=test_size)
         trained_pipe, train_metrics, test_metrics, importances = pipeline.train_final_model(model_obj)
 
         # Log metrics

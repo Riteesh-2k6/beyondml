@@ -149,8 +149,8 @@ class ConfigScreen(ModalScreen):
             
             yield Label("LLM Provider")
             with RadioSet(id="setup-llm-select"):
-                yield RadioButton("Ollama (Local)", value=os.getenv("LLM_PROVIDER") == "ollama" or not os.getenv("LLM_PROVIDER"))
-                yield RadioButton("Groq (Cloud)", value=os.getenv("LLM_PROVIDER") == "groq")
+                yield RadioButton("Groq (Cloud)", value=os.getenv("LLM_PROVIDER") == "groq" or not os.getenv("LLM_PROVIDER"))
+                yield RadioButton("Ollama (Local)", value=os.getenv("LLM_PROVIDER") == "ollama")
             
             yield Label("Groq API Key (required for Groq)")
             yield Input(value=os.getenv("GROQ_API_KEY", ""), id="setup-groq-key", password=True, placeholder="gsk_...")
@@ -166,7 +166,7 @@ class ConfigScreen(ModalScreen):
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "save-config-btn":
             llm_radio = self.query_one("#setup-llm-select", RadioSet)
-            provider = "ollama" if llm_radio.pressed_index == 0 else "groq"
+            provider = "groq" if llm_radio.pressed_index == 0 else "ollama"
             
             groq_key = self.query_one("#setup-groq-key", Input).value.strip()
             groq_model = self.query_one("#setup-groq-model", Input).value.strip()
@@ -220,7 +220,7 @@ class CompletionModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         r = self.results
-        with Vertical():
+        with VerticalScroll():
             yield Static("🎉  Pipeline Complete!", classes="modal-title")
             yield Rule()
             yield Static(f"\n[bold green]Test Score:[/bold green] {r.get('test_score', 'N/A')}")
@@ -230,12 +230,28 @@ class CompletionModal(ModalScreen):
                 yield Static(f"    {k}: {v}")
             model_path = r.get("model_path", "N/A")
             yield Static(f"\n[bold]Model saved:[/bold]\n    {model_path}")
+            
+            # Explainability
+            xai = r.get("xai_result", {})
+            if xai and xai.get("status") == "success":
+                yield Rule()
+                yield Static("[bold magenta]🔍 Explainability (SHAP)[/bold magenta]")
+                yield Static(f"    [italic]\"{xai.get('explanation', '')}\"[/italic]\n")
+                for d in xai.get("drivers", []):
+                    yield Static(f"    • {d}")
+
             yield Rule()
-            yield Button("Close  [ctrl+q]", variant="warning", classes="close-btn", id="close-modal")
+            with Horizontal():
+                yield Button("Export to Jupyter Notebook", variant="success", id="export-notebook-btn")
+                yield Button("Close", variant="warning", id="close-modal")
 
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "close-modal":
             self.dismiss()
+        elif event.button.id == "export-notebook-btn":
+            self.dismiss()
+            if hasattr(self.app.screen, "action_export"):
+                self.app.screen.action_export()
 
     def key_ctrl_q(self):
         self.dismiss()
@@ -244,6 +260,37 @@ class CompletionModal(ModalScreen):
 # ═══════════════════════════════════════════════════
 #  Welcome Screen
 # ═══════════════════════════════════════════════════
+
+class DatasetInput(Input):
+    """Input field that cycles through default datasets with up/down keys."""
+    
+    BINDINGS = [
+        Binding("up", "history_up", "Previous Dataset", show=False),
+        Binding("down", "history_down", "Next Dataset", show=False),
+    ]
+
+    def on_mount(self):
+        self.dataset_list = [
+            "data/titanic.csv",
+            "data/adult.csv",
+            "data/breast_cancer.csv"
+        ]
+        # Append existing echallan data if it exists or just keep it in rotation
+        self.dataset_list.append("data/echallan_daily_data.csv")
+        
+        self.idx = 0
+        self.value = self.dataset_list[self.idx]
+
+    def action_history_up(self):
+        self.idx = (self.idx - 1) % len(self.dataset_list)
+        self.value = self.dataset_list[self.idx]
+        self.action_end()  # Move cursor to end
+
+    def action_history_down(self):
+        self.idx = (self.idx + 1) % len(self.dataset_list)
+        self.value = self.dataset_list[self.idx]
+        self.action_end()
+
 
 class WelcomeScreen(Screen):
     """Compact boot screen — all fields visible on a 24-row terminal."""
@@ -277,8 +324,8 @@ class WelcomeScreen(Screen):
         yield Static(BANNER, classes="banner", markup=True)
         yield Static(SUBTITLE, classes="subtitle", markup=True)
         yield Rule()
-        yield Label("[bold]> CSV file path[/bold]  [dim](default: data/echallan_daily_data.csv)[/dim]", classes="field-label")
-        yield Input(value="data/echallan_daily_data.csv", id="csv-path", placeholder="data/sample.csv")
+        yield Label("[bold]> CSV file path[/bold]  [dim](Use Up/Down arrows to cycle defaults)[/dim]", classes="field-label")
+        yield DatasetInput(id="csv-path", placeholder="data/sample.csv")
         yield Label("[bold]> Dataset description[/bold]  [dim](optional)[/dim]", classes="field-label")
         yield Input(id="description", placeholder="e.g. Iris flower measurements for species classification")
         yield Label("[bold]> Inference CSV (for Drift Analysis)[/bold]  [dim](optional)[/dim]", classes="field-label")
@@ -293,15 +340,22 @@ class WelcomeScreen(Screen):
             yield RadioButton("Deep Learning  (Neural Networks)")
         yield Label("[bold]> LLM Provider[/bold]", classes="field-label")
         with RadioSet(id="llm-select"):
-            yield RadioButton("Ollama  (Local, private)", value=True)
-            yield RadioButton("Groq  (Cloud, fast)")
+            yield RadioButton("Groq  (Cloud, fast)", value=True)
+            yield RadioButton("Ollama  (Local, private)")
         with Horizontal(id="ga-config", classes="config-row"):
             with Vertical():
                 yield Label("[bold]> Pop Size[/bold]  [dim](GA)[/dim]", classes="field-label")
                 yield Input(value="10", id="ga-pop", placeholder="10")
             with Vertical():
+                yield Label("[bold]> Split Size[/bold]  [dim](Test %)[/dim]", classes="field-label")
+                yield Input(value="0.20", id="test-size", placeholder="0.20")
+            with Vertical():
                 yield Label("[bold]> Generations[/bold]  [dim](GA)[/dim]", classes="field-label")
                 yield Input(value="5", id="ga-gen", placeholder="5")
+        yield Label("[bold]> Auto-Ensemble[/bold]  [dim](Combine top 3 models)[/dim]", classes="field-label")
+        with RadioSet(id="ensemble-select"):
+            yield RadioButton("No  (Single Best Model)", value=True)
+            yield RadioButton("Yes  (Voting Ensemble)")
         # Bottom bar — always visible
         with Vertical(id="bottom-bar"):
             yield Static("[dim]Path: Explore (EDA only)[/dim]", id="path-info")
@@ -348,10 +402,14 @@ class WelcomeScreen(Screen):
 
         llm_radio = self.query_one("#llm-select", RadioSet)
         llm_idx = llm_radio.pressed_index
-        llm_choice = "ollama" if llm_idx == 0 else "groq"
+        llm_choice = "groq" if llm_idx == 0 else "ollama"
 
         ga_pop = int(self.query_one("#ga-pop", Input).value.strip() or "10")
         ga_gen = int(self.query_one("#ga-gen", Input).value.strip() or "5")
+        test_size = float(self.query_one("#test-size", Input).value.strip() or "0.20")
+        
+        ensemble_radio = self.query_one("#ensemble-select", RadioSet)
+        use_ensemble = ensemble_radio.pressed_index == 1
 
         # Resolve CSV path
         full_path = csv_path
@@ -388,7 +446,7 @@ class WelcomeScreen(Screen):
         await asyncio.sleep(0.5)
 
         self.app.push_screen(
-            PipelineScreen(df, full_path, description, path_choice, llm_choice, ga_pop, ga_gen, inference_csv_path, target_col="")
+            PipelineScreen(df, full_path, description, path_choice, llm_choice, ga_pop, ga_gen, inference_csv_path, target_col="", use_ensemble=use_ensemble, test_size=test_size)
         )
 
     def _reset_button(self):
@@ -488,7 +546,7 @@ class PipelineScreen(Screen):
         Binding("tab", "focus_next", "Focus", show=True),
     ]
 
-    def __init__(self, df: pd.DataFrame, path: str, description: str, path_choice: str, llm_choice: str = "ollama", ga_pop: int = 10, ga_gen: int = 5, inference_path: str = "", target_col: str = ""):
+    def __init__(self, df: pd.DataFrame, path: str, description: str, path_choice: str, llm_choice: str = "ollama", ga_pop: int = 10, ga_gen: int = 5, inference_path: str = "", target_col: str = "", use_ensemble: bool = False, test_size: float = 0.20):
         super().__init__()
         self.df = df
         self.inference_path = inference_path
@@ -499,6 +557,8 @@ class PipelineScreen(Screen):
         self.llm_choice = llm_choice
         self.ga_pop = ga_pop
         self.ga_gen = ga_gen
+        self.use_ensemble = use_ensemble
+        self.test_size = test_size
         self.input_queue = asyncio.Queue()
         self._fitness_data = []
         self.interactive_charts = []
@@ -1001,7 +1061,7 @@ class PipelineScreen(Screen):
                     # ── STEP 5.5: Ensemble Agent ──
                     top_genomes = ga_result.get("top_genomes", [])
                     prebuilt_model = None
-                    if len(top_genomes) > 1:
+                    if self.use_ensemble and len(top_genomes) > 1:
                         await self._log("\n[dim]─── Ensemble Agent ────────────────────────────[/dim]")
                         self._update_tree_node(tree, "Ensemble", "running")
                         
@@ -1070,6 +1130,7 @@ class PipelineScreen(Screen):
                     model_type=model_type,
                     problem_type=profile["target_analysis"]["target_type"],
                     log=self._log,
+                    test_size=self.test_size,
                     prebuilt_model=locals().get("prebuilt_model", None)
                 )
 
@@ -1096,6 +1157,7 @@ class PipelineScreen(Screen):
                         problem_type=profile["target_analysis"]["target_type"],
                         log=self._log
                     )
+                    eval_result["xai_result"] = explain_result
                     self._update_tree_node(tree, "Explainability", "done")
                 except Exception as e:
                     await self._log(f"  [yellow]⚠ Explainability skipped: {e}[/yellow]")
@@ -1116,6 +1178,13 @@ class PipelineScreen(Screen):
                 if eval_result['test_score'] > best_model_score:
                     best_model_score = eval_result['test_score']
                     best_eval_result = eval_result
+                    
+                    # Store on self for the export function
+                    self.best_eval_result = best_eval_result
+                    self.best_params = best_params
+                    self.best_model_type = model_type
+                    self.confirmed_target = confirmed_target
+                    self.problem_type = profile["target_analysis"]["target_type"]
                     
                 if reflection_result["status"] in ("satisfied", "error"):
                     break
@@ -1179,8 +1248,40 @@ class PipelineScreen(Screen):
     def action_save(self):
         self.notify("State saved!", severity="information")
 
-    def action_export(self):
-        self.notify("Report exported!", severity="information")
+    @work(thread=False)
+    async def action_export(self):
+        if not hasattr(self, 'best_eval_result') or not self.best_eval_result:
+            self.notify("No model has been fully trained yet to export.", severity="warning")
+            return
+            
+        self.notify("Generating Jupyter Notebook...", severity="information")
+        try:
+            from beyondml.agents.codegen_agent import CodeGenAgent
+            from beyondml.llm import get_llm_provider
+            
+            # Use the same LLM
+            if self.llm_choice == "groq":
+                from beyondml.llm.groq_provider import GroqProvider
+                llm = GroqProvider()
+            else:
+                from beyondml.llm.ollama_provider import OllamaProvider
+                llm = OllamaProvider()
+                
+            codegen = CodeGenAgent(llm)
+            out_path = await codegen.run(
+                dataset_path=self.dataset_path,
+                target_column=self.confirmed_target,
+                problem_type=self.problem_type,
+                best_params=self.best_params,
+                model_type=self.best_model_type,
+                eval_result=self.best_eval_result,
+                log=self._log,
+                test_size=self.test_size
+            )
+            self.notify(f"Exported to {out_path}!", severity="success")
+        except Exception as e:
+            self.notify(f"Export failed: {e}", severity="error")
+            await self._log(f"  [red]⚠ Export error: {e}[/red]")
 
     def action_quit(self):
         self.app.exit()

@@ -125,10 +125,11 @@ def _evaluate_genome_worker(
 
         # Adaptive Lambda scaling from ORI
         ori_score = profile.get("overfitting_risk_index", {}).get("score", 0.5)
-        beta = 1.5
-        l1 = 0.05 * (1 + beta * ori_score)
-        l2 = 0.15 * (1 + beta * ori_score)
-        l3 = 0.10 * (1 + beta * ori_score)
+        # Reduced beta so complexity penalty doesn't force underfitting
+        beta = 1.0 
+        l1 = 0.02 * (1 + beta * ori_score)  # Lower complexity penalty (prevents underfitting)
+        l2 = 0.10 * (1 + beta * ori_score)  # Stability penalty
+        l3 = 0.50 * (1 + beta * ori_score)  # Higher generalization gap penalty (prevents overfitting)
 
         fitness = mu_cv - (l1 * c_p) - (l2 * sigma_cv) - (l3 * generalization_gap)
         metrics = {"mu_cv": mu_cv, "sigma_cv": sigma_cv, "gap": generalization_gap, "complexity": c_p}
@@ -184,10 +185,10 @@ class Genome:
         if self.model_choice == "RandomForest":
             return {
                 "n_estimators": random.choice([50, 100, 150, 200, 250]),
-                "max_depth": random.choice([None, 2, 5, 7, 10, 15, 20]),
-                "min_samples_split": random.randint(2, 10),
-                "min_samples_leaf": random.randint(1, 5),
-                "max_features": random.choice(["sqrt", "log2", 0.3, 0.5, 0.7]),
+                "max_depth": random.choice([None, 5, 10, 15, 20, 30]),
+                "min_samples_split": random.choice([2, 5, 10]),
+                "min_samples_leaf": random.choice([1, 2, 4]),
+                "max_features": random.choice(["sqrt", "log2", 0.5, 0.7]),
             }
         elif self.model_choice == "LogisticRegression":
             return {"C": random.uniform(0.01, 10.0), "max_iter": 1000}
@@ -197,16 +198,16 @@ class Genome:
             return {"C": random.uniform(0.1, 10.0), "kernel": random.choice(["rbf", "linear", "poly"])}
         elif self.model_choice == "DecisionTree":
             return {
-                "max_depth": random.choice([None, 3, 5, 10, 15, 20]),
-                "min_samples_split": random.randint(2, 10),
+                "max_depth": random.choice([None, 5, 10, 15, 20, 30]),
+                "min_samples_split": random.choice([2, 5, 10]),
             }
         elif self.model_choice == "KNN":
             return {"n_neighbors": random.choice([3, 5, 7, 9, 11, 15])}
         elif self.model_choice == "GradientBoosting":
             return {
-                "n_estimators": random.choice([50, 100, 150, 200]),
+                "n_estimators": random.choice([50, 100, 150, 200, 300]),
                 "learning_rate": random.choice([0.01, 0.05, 0.1, 0.2]),
-                "max_depth": random.choice([3, 5, 7]),
+                "max_depth": random.choice([3, 5, 7, 9]),
             }
         return {}
 
@@ -311,7 +312,7 @@ class GeneticModelOptimizer:
                 last_best = history[-2]["best_fitness"]
                 if abs(gen_summary["best_fitness"] - last_best) < 1e-4:
                     # simplistic patience - for real patience we'd track a counter
-                    pass 
+                    break 
         
         # Spec 8.0: Final selection protocol - find best candidate
         best = max(self.population, key=lambda x: x.fitness)

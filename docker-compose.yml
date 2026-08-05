@@ -13,3 +13,6 @@ services:
       - ./data:/app/data
     env_file:
       - .env
+    environment:
+      # Allows the container to speak to Ollama running on the host machine
+      - OLLAMA_HOST=http://host.docker.internal:11434

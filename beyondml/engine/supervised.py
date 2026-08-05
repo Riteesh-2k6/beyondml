@@ -18,10 +18,11 @@ from .metrics import calculate_metrics
 
 
 class SupervisedPipeline:
-    def __init__(self, df: pd.DataFrame, target_column: str, profile: Dict[str, Any]):
+    def __init__(self, df: pd.DataFrame, target_column: str, profile: Dict[str, Any], test_size: float = 0.20):
         self.df = df
         self.target_column = target_column
         self.profile = profile
+        self.test_size = test_size
         self.problem_type = profile["target_analysis"]["target_type"]
         self.X = df.drop(columns=[target_column])
         self.y = df[target_column]
@@ -35,7 +36,7 @@ class SupervisedPipeline:
         stratify = self.y if self.problem_type == "classification" else None
         # Spec 1.1: Use evaluation-only outer folds concept or simple robust validation for baselines
         X_train, X_val, y_train, y_val = train_test_split(
-            self.X, self.y, test_size=0.2, random_state=42, stratify=stratify
+            self.X, self.y, test_size=self.test_size, random_state=42, stratify=stratify
         )
         preprocessor = self._build_preprocessor()
         results = {}
@@ -70,7 +71,7 @@ class SupervisedPipeline:
         if X_train is None:
             stratify = self.y if self.problem_type == "classification" else None
             X_train, X_test, y_train, y_test = train_test_split(
-                self.X, self.y, test_size=0.2, random_state=42, stratify=stratify
+                self.X, self.y, test_size=self.test_size, random_state=42, stratify=stratify
             )
         preprocessor = self._build_preprocessor()
         pipe = Pipeline([("preprocessor", preprocessor), ("model", model_obj)])

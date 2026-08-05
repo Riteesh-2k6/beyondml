@@ -36,6 +36,7 @@ dependencies = [
     "click>=8.1",
     "torch>=2.0",
     "torchvision>=0.15",
+    "nbformat>=5.0",
 ]
 
 [project.optional-dependencies]
